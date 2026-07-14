@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบการเงิน รพ.สต./สสอ.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0f2419;
+    --paper:#f6f4ee;
+    --paper-raised:#ffffff;
+    --line:#dfe0d5;
+    --moss-900:#0d2b20;
+    --moss-800:#123a2b;
+    --moss-700:#1a4d38;
+    --moss-600:#1f6b47;
+    --moss-500:#2b8a5c;
+    --teal-500:#0f8b8d;
+    --gold-500:#b8873a;
+    --gold-100:#f4e6cb;
+    --rose-600:#b5433a;
+    --rose-100:#fbe6e3;
+    --blue-600:#2a5f8f;
+    --blue-100:#e3edf6;
+    --radius:10px;
+    --shadow-sm:0 1px 2px rgba(15,36,25,.06);
+    --shadow-md:0 6px 20px rgba(15,36,25,.10);
+    --shadow-lg:0 16px 40px rgba(15,36,25,.16);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Sarabun',sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{font-family:'Prompt',sans-serif;}
+  button{font-family:inherit;cursor:pointer;}
+  input,select{font-family:inherit;}
+  a{color:inherit;}
+  ::selection{background:var(--gold-100);}
+
+  /* ---------- utility layout ---------- */
+  .row{display:flex;align-items:center;}
+  .col{display:flex;flex-direction:column;}
+  .gap-1{gap:6px;} .gap-2{gap:10px;} .gap-3{gap:16px;}
+  .grow{flex:1;}
+  .muted{color:#5b6b60;}
+  .small{font-size:12px;}
+  .xsmall{font-size:11px;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  .card{background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);}
+  .btn{border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;transition:filter .12s, transform .12s;}
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:linear-gradient(135deg,var(--moss-600),var(--teal-500));color:#fff;box-shadow:0 6px 16px rgba(31,107,71,.30);}
+  .btn-primary:hover{filter:brightness(1.06);}
+  .btn-secondary{background:#eceae1;color:var(--ink);}
+  .btn-secondary:hover{background:#e2dfd2;}
+  .btn-danger-soft{background:var(--rose-100);color:var(--rose-600);}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+  .btn-sm{padding:6px 10px;font-size:12px;border-radius:7px;}
+  .icon-btn{background:transparent;border:none;padding:6px;border-radius:6px;display:inline-flex;color:#4c5c51;}
+  .icon-btn:hover{background:#eceae1;}
+  .icon-btn.danger:hover{background:var(--rose-100);color:var(--rose-600);}
+  .icon-btn.blue:hover{background:var(--blue-100);color:var(--blue-600);}
+  .field-label{font-size:12px;font-weight:600;color:#4c5c51;margin-bottom:5px;display:block;}
+  .field{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);}
+  .field:focus{outline:none;border-color:var(--moss-500);box-shadow:0 0 0 3px rgba(43,138,92,.15);}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#6b7a70;padding:10px 12px;background:#f1efe6;}
+  td{padding:11px 12px;border-top:1px solid var(--line);}
+  tr:hover td{background:#faf9f4;}
+  .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600;}
+  .badge-green{background:#e2f2e7;color:var(--moss-700);}
+  .badge-amber{background:var(--gold-100);color:#8a6423;}
+  .badge-slate{background:#eceae1;color:#4c5c51;}
+
+  /* ---------- login ---------- */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+    background:radial-gradient(1200px 600px at 15% 10%, #163d2c 0%, transparent 60%),
+               radial-gradient(1000px 600px at 90% 90%, #0d3335 0%, transparent 55%),
+               linear-gradient(160deg,var(--moss-900),#0a1f16 70%);}
+  .login-card{width:100%;max-width:420px;background:rgba(246,244,238,.98);border-radius:16px;box-shadow:var(--shadow-lg);overflow:hidden;}
+  .login-head{background:linear-gradient(120deg,var(--moss-700),var(--teal-500));padding:30px 32px;color:#fff;}
+  .login-head .badge-mark{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;}
+  .login-body{padding:32px;}
+  .test-account-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#4c5c51;}
+
+  /* ---------- app shell ---------- */
+  .shell{display:flex;min-height:100vh;}
+  .sidebar{width:246px;background:linear-gradient(190deg,var(--moss-900),#0b2016 85%);color:#e7efe9;position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;transition:width .2s;z-index:30;}
+  .sidebar.collapsed{width:76px;}
+  .sb-head{padding:18px 16px;border-bottom:1px solid rgba(255,255,255,.08);}
+  .sb-logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--moss-500),var(--teal-500));display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .sb-nav{flex:1;padding:12px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;}
+  .sb-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:9px;border:none;background:transparent;color:#c7d6cb;text-align:left;width:100%;font-size:13.5px;font-weight:500;}
+  .sb-item:hover{background:rgba(255,255,255,.06);}
+  .sb-item.active{background:linear-gradient(120deg,var(--moss-600),var(--teal-500));color:#fff;box-shadow:0 6px 16px rgba(31,107,71,.35);}
+  .sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);}
+  .avatar{width:34px;height:34px;border-radius:99px;background:linear-gradient(135deg,var(--moss-500),var(--teal-500));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0;}
+  .main{flex:1;margin-left:246px;transition:margin-left .2s;min-width:0;}
+  .main.collapsed{margin-left:76px;}
+  .topbar{background:var(--paper-raised);border-bottom:1px solid var(--line);padding:14px 24px;position:sticky;top:0;z-index:20;}
+  .content{padding:22px;max-width:1400px;}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+  @media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:640px){.kpi-grid{grid-template-columns:1fr;} .sidebar{width:0;} .sidebar.open{width:246px;} .main{margin-left:0;}}
+  .kpi-card{padding:18px;}
+  .kpi-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;margin-bottom:10px;}
+
+  .chart-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:16px;}
+  @media(max-width:1000px){.chart-grid{grid-template-columns:1fr;}}
+
+  .report-card{padding:18px;border-radius:12px;border:2px solid var(--line);background:#fff;text-align:left;width:100%;}
+  .report-card.active{border-color:var(--moss-500);background:#f0f7f2;box-shadow:var(--shadow-sm);}
+  .report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  @media(max-width:900px){.report-grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:600px){.report-grid{grid-template-columns:1fr;}}
+
+  #report-content{font-family:'Sarabun',sans-serif;}
+  #report-content table th, #report-content table td{border:1px solid #94a396;}
+  #report-content table th{background:#eef0e6;}
+
+  .bank-tile{background:linear-gradient(150deg,var(--moss-900),#122c20);color:#fff;border-radius:14px;padding:18px;position:relative;overflow:hidden;}
+  .bank-tile::after{content:'';position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:99px;background:var(--teal-500);opacity:.18;filter:blur(6px);}
+
+  .toast{font-size:12px;padding:7px 12px;border-radius:8px;}
+  .toast-ok{background:#e2f2e7;color:var(--moss-700);}
+  .toast-err{background:var(--rose-100);color:var(--rose-600);}
+
+  .modal-form{border:2px solid var(--moss-500);border-radius:12px;background:#fff;padding:22px;}
+  .form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+  @media(max-width:700px){.form-grid{grid-template-columns:1fr;}}
+
+  @media print{
+    .sidebar,.topbar,.no-print{display:none !important;}
+    .main{margin-left:0 !important;}
+    body{background:#fff;}
+  }
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:#c9c6b8;border-radius:99px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+/* =========================================================
+   ระบบการเงิน รพ.สต./สสอ. — Vanilla JS Edition
+   ========================================================= */
+
+// ---------- ICONS (เซ็ตย่อ กำหนดเอง ไม่ใช้ไลบรารีภายนอก) ----------
+const ICON = {
+  shield:'<path d="M12 3l7 3v6c0 4.8-3 8.3-7 9-4-.7-7-4.2-7-9V6l7-3z"/>',
+  dashboard:'<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  wallet:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.2"/>',
+  file:'<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/>',
+  building:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1"/>',
+  calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  dollar:'<circle cx="12" cy="12" r="9"/><path d="M12 7v10M15 9.5c0-1.4-1.3-2.5-3-2.5s-3 1.1-3 2.3c0 3 6 1.5 6 4.5 0 1.3-1.3 2.2-3 2.2s-3-1-3-2.4"/>',
+  users:'<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 2.9-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17.5" cy="9" r="2.6"/><path d="M15.5 14c2.8.3 5 2.4 5 6"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.9-2.9l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.6-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.9-2.9l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.6V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.6 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.6 1z"/>',
+  logout:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  login:'<path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><path d="M10 17l-5-5 5-5"/><path d="M15 12H3"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
+  trash:'<path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/>',
+  download:'<path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/>',
+  print:'<rect x="6" y="9" width="12" height="7" rx="1"/><path d="M6 9V4h12v5"/><path d="M6 17v3h12v-3"/>',
+  up:'<path d="M3 17l6-6 4 4 8-9"/><path d="M15 6h6v6"/>',
+  down:'<path d="M3 7l6 6 4-4 8 9"/><path d="M15 18h6v-6"/>',
+  filter:'<path d="M4 5h16l-6 8v6l-4 2v-8z"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>',
+  check:'<path d="M20 6L9 17l-5-5"/>',
+  alert:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/>',
+  cloud:'<path d="M7 18a4 4 0 01-.6-7.96A5.5 5.5 0 0117 9.5a4 4 0 01-.5 8H7z"/><path d="M12 12v6M9.5 15.5L12 13l2.5 2.5"/>',
+  refresh:'<path d="M21 12a9 9 0 10-2.6 6.3"/><path d="M21 5v6h-6"/>',
+  loader:'<path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
+  eye:'<path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff:'<path d="M3 3l18 18"/><path d="M10.6 5.2A10.6 10.6 0 0112 5c7 0 10.5 7 10.5 7a13.4 13.4 0 01-3.1 4.1M6.5 6.6C3.6 8.4 1.5 12 1.5 12S5 19 12 19a10.7 10.7 0 004-.8"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>',
+  lock:'<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>',
+  database:'<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5V12c0 1.7 3.6 3 8 3s8-1.3 8-3V5.5"/><path d="M4 12v6.5c0 1.7 3.6 3 8 3s8-1.3 8-3V12"/>',
+  bars:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+};
+function icon(name, size=18){ return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[name]||''}</svg>`; }
+
+// ---------- FORMAT HELPERS ----------
+const thb = n => '฿' + Number(n||0).toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
+const thDate = d => { if(!d) return '-'; const dt = new Date(d); return dt.toLocaleDateString('th-TH', {year:'numeric', month:'long', day:'numeric'}); };
+const thDateShort = d => { if(!d) return '-'; const dt = new Date(d); return dt.toLocaleDateString('th-TH'); };
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now() + Math.floor(Math.random()*1000);
+
+// ---------- GAS CLIENT ----------
+// *** สำคัญ: ต้องตรงกับ API_KEY ใน Code.gs (ฝั่ง Google Apps Script) ***
+const GAS_API_KEY = 'A0xA-MPXc0sFoulNNRanTDqeUkW_QAqc';
+
+class GASClient {
+  constructor(url){ this.url = url; }
+  async get(params){
+    const q = new URLSearchParams({ ...params, key: GAS_API_KEY }).toString();
+    const res = await fetch(`${this.url}?${q}`, { method:'GET' });
+    return res.json();
+  }
+  async post(body){
+    const res = await fetch(this.url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ ...body, key: GAS_API_KEY }) });
+    return res.json();
+  }
+  login(username, password){ return this.get({ action:'login', username, password }); }
+  loadAll(){ return this.get({ action:'all' }); }
+  create(entity, data){ return this.post({ action:'create', entity, data }); }
+  update(entity, id, data){ return this.post({ action:'update', entity, id, data }); }
+  delete(entity, id){ return this.post({ action:'delete', entity, id }); }
+  bulkSync(entity, data){ return this.post({ action:'bulksync', entity, data }); }
+}
+
+// ---------- PDF EXPORT (รองรับภาษาไทยด้วย html2canvas) ----------
+function loadScriptOnce(src){
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error('โหลดสคริปต์ไม่สำเร็จ: ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function loadPDFLibs(){
+  await Promise.all([
+    loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+    loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+  ]);
+}
+async function exportElementToPDF(elementId, filename){
+  await loadPDFLibs();
+  const el = document.getElementById(elementId);
+  if (!el) throw new Error('ไม่พบเนื้อหาที่จะพิมพ์');
+  const canvas = await window.html2canvas(el, { scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false });
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p','mm','a4');
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+  const imgW = pdfW - 20;
+  const imgH = (canvas.height * imgW) / canvas.width;
+  const imgData = canvas.toDataURL('image/jpeg', 0.95);
+  let heightLeft = imgH, position = 10;
+  pdf.addImage(imgData, 'JPEG', 10, position, imgW, imgH);
+  heightLeft -= (pdfH - 20);
+  while (heightLeft > 0){
+    position = heightLeft - imgH + 10;
+    pdf.addPage();
+    pdf.addImage(imgData, 'JPEG', 10, position, imgW, imgH);
+    heightLeft -= (pdfH - 20);
+  }
+  pdf.save(filename);
+}
+
+// ---------- STATE ----------
+// URL ของ Google Apps Script Web App (ฝังไว้ล่วงหน้าเพื่อให้เชื่อมต่ออัตโนมัติ)
+// หากย้ายไปใช้ Apps Script ตัวใหม่ ให้แก้ URL ตรงนี้ หรือเปลี่ยนที่หน้า "ตั้งค่าระบบ" ในแอปได้เช่นกัน
+const GAS_DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbz9D4UnFHa0CzTwcwJPWDDDlPFoeT_2llVs11NriN6avqsAQauSyv8wv-doEDJ40lo/exec';
+
+const state = {
+  auth: { currentUser: null },
+  gas: { url: GAS_DEFAULT_URL, client: GAS_DEFAULT_URL ? new GASClient(GAS_DEFAULT_URL) : null, status:'offline', message:'' },
+  ui: {
+    activePage: 'dashboard',
+    sidebarOpen: true,
+    loginForm: { username:'', password:'' },
+    showPassword: false,
+    loginError: '',
+    loginLoading: false,
+    showGasField: false,
+    dashboard: { facility:'all' },
+    transactions: { showForm:false, editing:null, search:'', filterType:'all', form:{} },
+    facilities: { showForm:false, editing:null, form:{} },
+    fiscalyears: { showForm:false, form:{} },
+    bankaccounts: { showForm:false, editing:null, form:{} },
+    staff: { showForm:false, editing:null, form:{} },
+    reports: { selected:'407', date: new Date().toISOString().split('T')[0], facility:'all', exporting:false, exportError:'' },
+    settings: { tempUrl:'' },
+  },
+  data: {
+    users: [
+      { id:1, username:'admin', password:'1234', name:'ผู้ดูแลระบบ', role:'admin', facility:'all' },
+      { id:2, username:'manager', password:'1234', name:'นพ.สมชาย ใจดี', role:'manager', facility:'all' },
+      { id:3, username:'finance1', password:'1234', name:'น.ส.สมหญิง รักงาน', role:'staff', facility:1 },
+      { id:4, username:'finance2', password:'1234', name:'นายวิชัย ขยัน', role:'staff', facility:2 },
+    ],
+    facilities: [
+      { id:1, code:'07429', name:'รพ.สต.บ้านหนองบัว', type:'รพ.สต.', address:'ต.หนองบัว อ.เมือง', phone:'044-123456' },
+      { id:2, code:'07430', name:'รพ.สต.บ้านโนนสูง', type:'รพ.สต.', address:'ต.โนนสูง อ.เมือง', phone:'044-123457' },
+      { id:3, code:'07431', name:'รพ.สต.บ้านดอนแก้ว', type:'รพ.สต.', address:'ต.ดอนแก้ว อ.เมือง', phone:'044-123458' },
+      { id:4, code:'00001', name:'สสอ.เมือง', type:'สสอ.', address:'อ.เมือง', phone:'044-100000' },
+    ],
+    fiscalYears: [
+      { id:1, year:2568, startDate:'2024-10-01', endDate:'2025-09-30', isActive:true },
+      { id:2, year:2567, startDate:'2023-10-01', endDate:'2024-09-30', isActive:false },
+    ],
+    bankAccounts: [
+      { id:1, facilityId:1, bankName:'ธ.กรุงไทย', accountNo:'123-4-56789-0', accountName:'รพ.สต.หนองบัว', accountType:'ออมทรัพย์', balance:458750.50 },
+      { id:2, facilityId:1, bankName:'ธ.ออมสิน', accountNo:'987-6-54321-0', accountName:'รพ.สต.หนองบัว (UC)', accountType:'กระแสรายวัน', balance:125300.00 },
+      { id:3, facilityId:2, bankName:'ธ.กรุงไทย', accountNo:'111-2-33445-5', accountName:'รพ.สต.โนนสูง', accountType:'ออมทรัพย์', balance:320400.75 },
+      { id:4, facilityId:3, bankName:'ธ.กรุงไทย', accountNo:'222-3-44556-6', accountName:'รพ.สต.ดอนแก้ว', accountType:'ออมทรัพย์', balance:287900.25 },
+      { id:5, facilityId:4, bankName:'ธ.กรุงไทย', accountNo:'999-8-77665-5', accountName:'สสอ.เมือง', accountType:'ออมทรัพย์', balance:1250000.00 },
+    ],
+    staff: [
+      { id:1, facilityId:1, name:'นางสมหญิง รักงาน', position:'ผอ.รพ.สต.', idCard:'1234567890123', phone:'081-1234567' },
+      { id:2, facilityId:1, name:'นายสมชาย ใจดี', position:'นวก.สาธารณสุข', idCard:'1234567890124', phone:'081-1234568' },
+      { id:3, facilityId:2, name:'นายวิชัย ขยัน', position:'ผอ.รพ.สต.', idCard:'1234567890125', phone:'081-1234569' },
+      { id:4, facilityId:3, name:'น.ส.มาลี สดใส', position:'ผอ.รพ.สต.', idCard:'1234567890126', phone:'081-1234570' },
+      { id:5, facilityId:4, name:'นพ.สมศักดิ์ มั่นคง', position:'สาธารณสุขอำเภอ', idCard:'1234567890127', phone:'081-1234571' },
+    ],
+    transactions: [
+      { id:1, date:'2025-04-25', facilityId:1, accountId:1, type:'income', category:'งบ UC', amount:50000, description:'รับโอนงบ UC เดือน เม.ย.', refNo:'UC-202504-001' },
+      { id:2, date:'2025-04-25', facilityId:1, accountId:1, type:'expense', category:'ค่าวัสดุ', amount:8500, description:'ซื้อวัสดุการแพทย์', refNo:'EXP-001' },
+      { id:3, date:'2025-04-24', facilityId:1, accountId:2, type:'income', category:'งบ PP', amount:25000, description:'รับโอนงบ PP', refNo:'PP-202504-001' },
+      { id:4, date:'2025-04-23', facilityId:2, accountId:3, type:'income', category:'งบ UC', amount:45000, description:'รับโอนงบ UC', refNo:'UC-202504-002' },
+      { id:5, date:'2025-04-22', facilityId:2, accountId:3, type:'expense', category:'ค่าตอบแทน', amount:12000, description:'ค่าตอบแทน อสม.', refNo:'EXP-002' },
+      { id:6, date:'2025-04-20', facilityId:3, accountId:4, type:'income', category:'งบ UC', amount:48000, description:'รับโอนงบ UC', refNo:'UC-202504-003' },
+      { id:7, date:'2025-04-20', facilityId:3, accountId:4, type:'expense', category:'ค่าสาธารณูปโภค', amount:5500, description:'ค่าไฟฟ้า', refNo:'EXP-003' },
+      { id:8, date:'2025-04-18', facilityId:4, accountId:5, type:'income', category:'งบบริหาร', amount:150000, description:'รับโอนงบบริหาร', refNo:'ADM-001' },
+    ],
+  },
+  charts: {},
+};
+
+function render(){
+  const root = document.getElementById('root');
+  // เก็บตำแหน่ง focus/cursor ไว้ก่อน re-render เพื่อไม่ให้ผู้ใช้พิมพ์แล้วโฟกัสหลุด
+  const active = document.activeElement;
+  let focusId = null, selStart = null, selEnd = null;
+  if (active && active.id && (active.tagName==='INPUT' || active.tagName==='SELECT' || active.tagName==='TEXTAREA')){
+    focusId = active.id;
+    if (typeof active.selectionStart === 'number'){ selStart = active.selectionStart; selEnd = active.selectionEnd; }
+  }
+  root.innerHTML = state.auth.currentUser ? renderAppShell() : renderLogin();
+  try { afterRender(); } catch(e){ console.error('afterRender error:', e); }
+  if (focusId){
+    const el = document.getElementById(focusId);
+    if (el){
+      el.focus();
+      if (selStart !== null && el.setSelectionRange){ try{ el.setSelectionRange(selStart, selEnd); }catch(e){} }
+    }
+  }
+}
+function afterRender(){
+  if (state.auth.currentUser && state.ui.activePage === 'dashboard') renderDashboardCharts();
+  attachEnterKeyHandlers();
+}
+function attachEnterKeyHandlers(){
+  const u = document.getElementById('login-username');
+  const p = document.getElementById('login-password');
+  [u,p].forEach(el => { if(el) el.addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); }); });
+}
+
+// =========================================================
+// LOGIN PAGE
+// =========================================================
+function renderLogin(){
+  const { loginForm, showPassword, loginError, loginLoading, showGasField } = state.ui;
+  return `
+  <div class="login-wrap">
+    <div style="width:100%;max-width:420px;">
+      <div class="login-card">
+        <div class="login-head">
+          <div class="row gap-2">
+            <div class="badge-mark">${icon('shield',24)}</div>
+            <div>
+              <h1 style="margin:0;font-size:21px;">ระบบการเงิน</h1>
+              <p style="margin:2px 0 0;font-size:13px;opacity:.85;">รพ.สต. และ สสอ.</p>
+            </div>
+          </div>
+        </div>
+        <div class="login-body">
+          <h2 style="margin:0 0 2px;font-size:18px;">เข้าสู่ระบบ</h2>
+          <p class="muted small" style="margin:0 0 20px;">${state.gas.client ? 'เชื่อมต่อ Google Sheets แล้ว' : 'โหมด Local (ทดสอบ)'}</p>
+
+          <label class="field-label">ชื่อผู้ใช้</label>
+          <div style="position:relative;margin-bottom:14px;">
+            <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a396;">${icon('user',18)}</span>
+            <input id="login-username" class="field" style="padding-left:38px;" value="${esc(loginForm.username)}"
+              oninput="state.ui.loginForm.username=this.value">
+          </div>
+
+          <label class="field-label">รหัสผ่าน</label>
+          <div style="position:relative;margin-bottom:6px;">
+            <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a396;">${icon('lock',18)}</span>
+            <input id="login-password" class="field" style="padding-left:38px;padding-right:38px;" type="${showPassword?'text':'password'}" value="${esc(loginForm.password)}"
+              oninput="state.ui.loginForm.password=this.value">
+            <button class="icon-btn" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);" onclick="state.ui.showPassword=!state.ui.showPassword;render();">
+              ${icon(showPassword?'eyeoff':'eye',18)}
+            </button>
+          </div>
+
+          ${loginError ? `<div class="toast toast-err row gap-1" style="margin:10px 0;">${icon('alert',15)} ${esc(loginError)}</div>` : ''}
+
+          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;" onclick="doLogin()" ${loginLoading?'disabled':''}>
+            ${loginLoading ? icon('loader',18) : icon('login',18)} ${loginLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
+          </button>
+
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);">
+            <button class="small" style="background:none;border:none;color:#4c5c51;font-weight:600;padding:0;" onclick="state.ui.showGasField=!state.ui.showGasField;render();">
+              ⚙️ ตั้งค่า Google Sheets (Advanced)
+            </button>
+            ${showGasField ? `
+              <div style="margin-top:10px;">
+                <input class="field mono xsmall" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(state.gas.url)}"
+                  oninput="state.gas.url=this.value" onchange="applyGasUrl(this.value)">
+                <p class="xsmall muted" style="margin:4px 0 0;">ใส่ URL ของ Google Apps Script Web App</p>
+              </div>` : ''}
+          </div>
+
+          ${!state.gas.url ? `
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
+            <p class="xsmall muted" style="font-weight:600;margin:0 0 6px;">บัญชีทดสอบ (Local):</p>
+            <div class="test-account-row"><span>👨‍💼 admin / 1234</span><span class="muted">ผู้ดูแลระบบ</span></div>
+            <div class="test-account-row"><span>👔 manager / 1234</span><span class="muted">ผู้บริหาร</span></div>
+            <div class="test-account-row"><span>👤 finance1 / 1234</span><span class="muted">เจ้าหน้าที่</span></div>
+          </div>` : ''}
+        </div>
+      </div>
+      <p style="text-align:center;color:rgba(255,255,255,.55);font-size:12px;margin-top:20px;">© 2568 ระบบการเงิน รพ.สต./สสอ.</p>
+    </div>
+  </div>`;
+}
+
+function applyGasUrl(url){ state.gas.url = url; state.gas.client = url ? new GASClient(url) : null; }
+
+async function doLogin(){
+  state.ui.loginError = '';
+  state.ui.loginLoading = true; render();
+  const { username, password } = state.ui.loginForm;
+  try{
+    if (state.gas.client){
+      const res = await state.gas.client.login(username, password);
+      if (res.success){
+        state.auth.currentUser = res.user;
+        state.ui.loginForm = { username:'', password:'' };
+        await syncAllFromGAS();
+      } else {
+        state.ui.loginError = res.message || 'เข้าสู่ระบบไม่สำเร็จ';
+      }
+    } else {
+      const user = state.data.users.find(u => u.username===username && u.password===password);
+      if (user){ state.auth.currentUser = user; state.ui.loginForm = { username:'', password:'' }; }
+      else state.ui.loginError = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+    }
+  } catch(err){
+    state.ui.loginError = 'เกิดข้อผิดพลาด: ' + err.message;
+  } finally {
+    state.ui.loginLoading = false; render();
+  }
+}
+function doLogout(){ state.auth.currentUser = null; state.ui.activePage = 'dashboard'; render(); }
+
+// =========================================================
+// APP SHELL
+// =========================================================
+const MENU = [
+  { id:'dashboard', label:'แดชบอร์ด', icon:'dashboard', roles:['admin','manager','staff'] },
+  { id:'transactions', label:'บันทึกรายการ', icon:'wallet', roles:['admin','staff'] },
+  { id:'reports', label:'รายงาน', icon:'file', roles:['admin','manager','staff'] },
+  { id:'facilities', label:'สถานบริการ', icon:'building', roles:['admin'] },
+  { id:'fiscalyears', label:'ปีงบประมาณ', icon:'calendar', roles:['admin'] },
+  { id:'bankaccounts', label:'บัญชีธนาคาร', icon:'dollar', roles:['admin','staff'] },
+  { id:'staff', label:'บุคลากร', icon:'users', roles:['admin','staff'] },
+  { id:'settings', label:'ตั้งค่าระบบ', icon:'settings', roles:['admin'] },
+];
+
+function visibleFacilities(){
+  const u = state.auth.currentUser;
+  if (!u) return [];
+  if (u.facility === 'all') return state.data.facilities;
+  return state.data.facilities.filter(f => String(f.id)===String(u.facility));
+}
+function visibleTransactions(){
+  const u = state.auth.currentUser;
+  if (!u) return [];
+  if (u.facility === 'all') return state.data.transactions;
+  return state.data.transactions.filter(t => String(t.facilityId)===String(u.facility));
+}
+
+function renderAppShell(){
+  const user = state.auth.currentUser;
+  const menu = MENU.filter(m => m.roles.includes(user.role));
+  const activeLabel = (menu.find(m=>m.id===state.ui.activePage)||{}).label || 'แดชบอร์ด';
+  const activeFY = state.data.fiscalYears.find(f=>f.isActive);
+  const sbClass = state.ui.sidebarOpen ? '' : 'collapsed';
+
+  return `
+  <div class="shell">
+    <aside class="sidebar ${sbClass}">
+      <div class="sb-head row gap-2">
+        <div class="sb-logo">${icon('shield',20)}</div>
+        ${state.ui.sidebarOpen ? `<div><div style="font-weight:700;font-size:13.5px;">ระบบการเงิน</div><div class="xsmall" style="opacity:.65;">รพ.สต./สสอ.</div></div>`:''}
+      </div>
+      <nav class="sb-nav">
+        ${menu.map(m => `
+          <button class="sb-item ${state.ui.activePage===m.id?'active':''}" onclick="goPage('${m.id}')">
+            ${icon(m.icon,18)} ${state.ui.sidebarOpen?`<span>${m.label}</span>`:''}
+          </button>`).join('')}
+      </nav>
+      <div class="sb-foot">
+        <div class="row gap-2" style="padding:6px;margin-bottom:6px;">
+          <div class="avatar">${esc(user.name.charAt(0))}</div>
+          ${state.ui.sidebarOpen ? `<div style="overflow:hidden;">
+            <div class="small" style="font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;">${esc(user.name)}</div>
+            <div class="xsmall" style="opacity:.6;">${user.role==='admin'?'ผู้ดูแลระบบ':user.role==='manager'?'ผู้บริหาร':'เจ้าหน้าที่'}</div>
+          </div>` : ''}
+        </div>
+        <button class="sb-item" style="color:#f3a29a;" onclick="doLogout()">${icon('logout',16)} ${state.ui.sidebarOpen?'<span>ออกจากระบบ</span>':''}</button>
+      </div>
+    </aside>
+
+    <main class="main ${sbClass}">
+      <header class="topbar row" style="justify-content:space-between;">
+        <div class="row gap-2">
+          <button class="icon-btn" onclick="state.ui.sidebarOpen=!state.ui.sidebarOpen;render();">${icon('bars',20)}</button>
+          <div>
+            <h2 style="margin:0;font-size:16.5px;">${activeLabel}</h2>
+            <p class="xsmall muted" style="margin:2px 0 0;">ปีงบประมาณ ${activeFY?activeFY.year:'-'} | ${new Date().toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'})}</p>
+          </div>
+        </div>
+        <div class="row gap-2 no-print">
+          ${state.gas.message ? `<div class="toast ${state.gas.status==='error'?'toast-err':'toast-ok'}">${esc(state.gas.message)}</div>` : ''}
+          ${state.gas.client ? `
+            <button class="btn btn-secondary btn-sm" onclick="syncAllFromGAS()">
+              ${state.gas.status==='syncing'?icon('loader',15):icon('cloud',15)}
+              <span>${state.gas.status==='connected'?'Google Sheets':state.gas.status==='syncing'?'กำลังซิงค์':'ซิงค์ข้อมูล'}</span>
+              ${icon('check',14)}
+            </button>` : `<div class="toast" style="background:var(--gold-100);color:#8a6423;">${icon('alert',14)} โหมด Local</div>`}
+        </div>
+      </header>
+      <div class="content">
+        ${renderPage()}
+      </div>
+    </main>
+  </div>`;
+}
+
+function goPage(id){ state.ui.activePage = id; render(); }
+
+function renderPage(){
+  switch(state.ui.activePage){
+    case 'dashboard': return renderDashboard();
+    case 'transactions': return renderTransactions();
+    case 'reports': return renderReports();
+    case 'facilities': return renderFacilities();
+    case 'fiscalyears': return renderFiscalYears();
+    case 'bankaccounts': return renderBankAccounts();
+    case 'staff': return renderStaff();
+    case 'settings': return renderSettings();
+    default: return '';
+  }
+}
+
+// =========================================================
+// DASHBOARD
+// =========================================================
+function renderDashboard(){
+  const facilities = visibleFacilities();
+  const user = state.auth.currentUser;
+  const sel = state.ui.dashboard.facility;
+  const trans = sel==='all' ? visibleTransactions() : state.data.transactions.filter(t=>String(t.facilityId)===String(sel));
+  const accounts = sel==='all'
+    ? state.data.bankAccounts.filter(b=>facilities.some(f=>String(f.id)===String(b.facilityId)))
+    : state.data.bankAccounts.filter(b=>String(b.facilityId)===String(sel));
+
+  const balance = accounts.reduce((s,a)=>s+Number(a.balance||0),0);
+  const income = trans.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const expense = trans.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+
+  const recent = [...trans].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
+
+  return `
+    ${user.facility==='all' ? `
+    <div class="card row gap-2" style="padding:14px 16px;margin-bottom:16px;">
+      ${icon('filter',18)}
+      <span class="small" style="font-weight:600;">แสดงข้อมูล:</span>
+      <select class="field" style="width:auto;padding:7px 10px;" onchange="state.ui.dashboard.facility=this.value;render();">
+        <option value="all" ${sel==='all'?'selected':''}>ภาพรวมทั้งหมด</option>
+        ${facilities.map(f=>`<option value="${f.id}" ${String(sel)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+
+    <div class="kpi-grid">
+      ${kpiCard('เงินคงเหลือรวม', balance, 'wallet', 'linear-gradient(135deg,#2b8a5c,#0f8b8d)', accounts.length+' บัญชี')}
+      ${kpiCard('รายรับสะสม', income, 'up', 'linear-gradient(135deg,#2a5f8f,#0f8b8d)', 'ปีงบประมาณนี้')}
+      ${kpiCard('รายจ่ายสะสม', expense, 'down', 'linear-gradient(135deg,#b5433a,#c9634f)', 'ปีงบประมาณนี้')}
+      ${kpiCard('คงเหลือสุทธิ', income-expense, 'dollar', 'linear-gradient(135deg,#b8873a,#c9a13f)', 'รายรับ - รายจ่าย')}
+    </div>
+
+    <div class="chart-grid">
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0;font-size:15px;">รายรับ-รายจ่ายรายเดือน</h3>
+        <p class="xsmall muted" style="margin:2px 0 14px;">ปีงบประมาณ 2568 (ต.ค.67 - ก.ย.68)</p>
+        <canvas id="chart-monthly" height="150"></canvas>
+      </div>
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0;font-size:15px;">สัดส่วนรายจ่าย</h3>
+        <p class="xsmall muted" style="margin:2px 0 14px;">แยกตามหมวด</p>
+        <canvas id="chart-category" height="200"></canvas>
+      </div>
+    </div>
+
+    ${sel==='all' && facilities.length>1 ? `
+    <div class="card" style="padding:20px;margin-top:16px;">
+      <h3 style="margin:0;font-size:15px;">เปรียบเทียบรายสถานบริการ</h3>
+      <p class="xsmall muted" style="margin:2px 0 14px;">รายรับและรายจ่ายแต่ละแห่ง</p>
+      <canvas id="chart-facility" height="110"></canvas>
+    </div>` : ''}
+
+    <div class="card" style="padding:20px;margin-top:16px;">
+      <h3 style="margin:0 0 12px;font-size:15px;">รายการล่าสุด</h3>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>วันที่</th><th>รายการ</th><th>หมวด</th><th style="text-align:right;">จำนวนเงิน</th></tr></thead>
+          <tbody>
+            ${recent.length ? recent.map(t=>`
+              <tr>
+                <td class="muted">${thDateShort(t.date)}</td>
+                <td>${esc(t.description)}</td>
+                <td><span class="badge badge-slate">${esc(t.category)}</span></td>
+                <td style="text-align:right;font-weight:600;color:${t.type==='income'?'var(--moss-600)':'var(--rose-600)'};">${t.type==='income'?'+':'-'}${thb(t.amount)}</td>
+              </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;padding:24px;color:#94a396;">ยังไม่มีรายการ</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function kpiCard(title, value, iconName, gradient, subtitle){
+  return `
+  <div class="card kpi-card">
+    <div class="kpi-icon" style="background:${gradient};">${icon(iconName,19)}</div>
+    <p class="xsmall muted" style="margin:0 0 3px;">${title}</p>
+    <p class="display" style="margin:0;font-size:22px;font-weight:700;">${thb(value)}</p>
+    <p class="xsmall muted" style="margin:4px 0 0;">${subtitle}</p>
+  </div>`;
+}
+
+const CHART_COLORS = ['#2b8a5c','#0f8b8d','#2a5f8f','#b8873a','#7c5cbf','#b5433a'];
+
+function renderDashboardCharts(){
+  if (typeof Chart === 'undefined'){
+    // Chart.js ยังโหลดไม่เสร็จ (เช่น อินเทอร์เน็ตช้า) — ลองใหม่อีกครั้งสั้นๆ โดยไม่ทำให้แอปพัง
+    ['chart-monthly','chart-category','chart-facility'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.parentElement.insertAdjacentHTML('beforeend', `<p class="muted xsmall" style="text-align:center;padding:12px 0;">กำลังโหลดกราฟ...</p>`);
+    });
+    setTimeout(() => { if (state.ui.activePage==='dashboard') renderDashboardCharts(); }, 800);
+    return;
+  }
+  const facilities = visibleFacilities();
+  const sel = state.ui.dashboard.facility;
+  const trans = sel==='all' ? visibleTransactions() : state.data.transactions.filter(t=>String(t.facilityId)===String(sel));
+
+  // destroy existing
+  Object.values(state.charts).forEach(c => c && c.destroy && c.destroy());
+  state.charts = {};
+
+  // Monthly
+  const months = [
+    {m:'2024-10',l:'ต.ค.'},{m:'2024-11',l:'พ.ย.'},{m:'2024-12',l:'ธ.ค.'},
+    {m:'2025-01',l:'ม.ค.'},{m:'2025-02',l:'ก.พ.'},{m:'2025-03',l:'มี.ค.'},
+    {m:'2025-04',l:'เม.ย.'},{m:'2025-05',l:'พ.ค.'},{m:'2025-06',l:'มิ.ย.'},
+    {m:'2025-07',l:'ก.ค.'},{m:'2025-08',l:'ส.ค.'},{m:'2025-09',l:'ก.ย.'},
+  ];
+  const incomeSeries = months.map(({m}) => trans.filter(t=>String(t.date).startsWith(m)&&t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0));
+  const expenseSeries = months.map(({m}) => trans.filter(t=>String(t.date).startsWith(m)&&t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0));
+  const elMonthly = document.getElementById('chart-monthly');
+  if (elMonthly){
+    state.charts.monthly = new Chart(elMonthly, {
+      type:'line',
+      data:{ labels: months.map(m=>m.l), datasets:[
+        { label:'รายรับ', data:incomeSeries, borderColor:'#2b8a5c', backgroundColor:'rgba(43,138,92,.15)', fill:true, tension:.35 },
+        { label:'รายจ่าย', data:expenseSeries, borderColor:'#b5433a', backgroundColor:'rgba(181,67,58,.12)', fill:true, tension:.35 },
+      ]},
+      options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Sarabun'}}}}, scales:{ y:{ ticks:{ callback:v=>(v/1000)+'K', font:{family:'Sarabun'} } }, x:{ ticks:{font:{family:'Sarabun'}} } } }
+    });
+  }
+
+  // Category pie
+  const catMap = {};
+  trans.filter(t=>t.type==='expense').forEach(t => { catMap[t.category]=(catMap[t.category]||0)+Number(t.amount||0); });
+  const catLabels = Object.keys(catMap);
+  const elCat = document.getElementById('chart-category');
+  if (elCat){
+    if (catLabels.length){
+      state.charts.category = new Chart(elCat, {
+        type:'doughnut',
+        data:{ labels:catLabels, datasets:[{ data:Object.values(catMap), backgroundColor:CHART_COLORS }] },
+        options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Sarabun'},boxWidth:12}}} }
+      });
+    } else {
+      elCat.parentElement.insertAdjacentHTML('beforeend', `<p class="muted small" style="text-align:center;padding:40px 0;">ยังไม่มีข้อมูล</p>`);
+    }
+  }
+
+  // Facility comparison
+  const elFac = document.getElementById('chart-facility');
+  if (elFac){
+    const facLabels = facilities.map(f=>f.name.replace('รพ.สต.','').replace('สสอ.',''));
+    const facIncome = facilities.map(f => state.data.transactions.filter(t=>String(t.facilityId)===String(f.id)&&t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0));
+    const facExpense = facilities.map(f => state.data.transactions.filter(t=>String(t.facilityId)===String(f.id)&&t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0));
+    state.charts.facility = new Chart(elFac, {
+      type:'bar',
+      data:{ labels:facLabels, datasets:[
+        { label:'รายรับ', data:facIncome, backgroundColor:'#2b8a5c', borderRadius:4 },
+        { label:'รายจ่าย', data:facExpense, backgroundColor:'#b5433a', borderRadius:4 },
+      ]},
+      options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{font:{family:'Sarabun'}}}}, scales:{ y:{ ticks:{ callback:v=>(v/1000)+'K', font:{family:'Sarabun'} } }, x:{ ticks:{font:{family:'Sarabun'}} } } }
+    });
+  }
+}
+
+// =========================================================
+// TRANSACTIONS
+// =========================================================
+const CATEGORIES = ['งบ UC','งบ PP','งบบริหาร','ค่าวัสดุ','ค่าตอบแทน','ค่าสาธารณูปโภค','ค่าใช้จ่ายอื่น'];
+
+function emptyTxForm(){
+  const facilities = visibleFacilities();
+  const accs = state.data.bankAccounts.filter(a=>String(a.facilityId)===String(facilities[0]?.id));
+  return { date:new Date().toISOString().split('T')[0], facilityId:facilities[0]?.id||1, accountId:accs[0]?.id||1, type:'income', category:'งบ UC', amount:'', description:'', refNo:'' };
+}
+
+function renderTransactions(){
+  const ui = state.ui.transactions;
+  const facilities = visibleFacilities();
+  const all = visibleTransactions();
+  const filtered = all
+    .filter(t => ui.filterType==='all' || t.type===ui.filterType)
+    .filter(t => !ui.search || String(t.description).includes(ui.search) || String(t.refNo).includes(ui.search))
+    .sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  if (!ui.form || Object.keys(ui.form).length===0) ui.form = emptyTxForm();
+  const f = ui.form;
+  const accountsForFacility = state.data.bankAccounts.filter(a=>String(a.facilityId)===String(f.facilityId));
+
+  return `
+    <div class="card row gap-2" style="padding:14px;flex-wrap:wrap;">
+      <div class="grow" style="position:relative;min-width:180px;">
+        <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a396;">${icon('search',16)}</span>
+        <input id="tx-search" class="field" style="padding-left:34px;" placeholder="ค้นหารายการ..." value="${esc(ui.search)}" oninput="state.ui.transactions.search=this.value;renderPageOnly();">
+      </div>
+      <select class="field" style="width:auto;" onchange="state.ui.transactions.filterType=this.value;renderPageOnly();">
+        <option value="all" ${ui.filterType==='all'?'selected':''}>ทั้งหมด</option>
+        <option value="income" ${ui.filterType==='income'?'selected':''}>รายรับ</option>
+        <option value="expense" ${ui.filterType==='expense'?'selected':''}>รายจ่าย</option>
+      </select>
+      <button class="btn btn-primary" onclick="state.ui.transactions.showForm=true;state.ui.transactions.editing=null;state.ui.transactions.form=emptyTxForm();render();">${icon('plus',16)} เพิ่มรายการ</button>
+    </div>
+
+    ${ui.showForm ? `
+    <div class="modal-form" style="margin-top:14px;">
+      <h3 style="margin:0 0 14px;font-size:15px;">${ui.editing?'แก้ไขรายการ':'เพิ่มรายการใหม่'}</h3>
+      <div class="form-grid">
+        <div><label class="field-label">วันที่</label><input type="date" class="field" value="${f.date}" onchange="state.ui.transactions.form.date=this.value"></div>
+        <div><label class="field-label">สถานบริการ</label>
+          <select class="field" onchange="state.ui.transactions.form.facilityId=this.value;renderPageOnly();">
+            ${facilities.map(fc=>`<option value="${fc.id}" ${String(f.facilityId)===String(fc.id)?'selected':''}>${esc(fc.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="field-label">บัญชีธนาคาร</label>
+          <select class="field" onchange="state.ui.transactions.form.accountId=this.value">
+            ${accountsForFacility.map(a=>`<option value="${a.id}" ${String(f.accountId)===String(a.id)?'selected':''}>${esc(a.bankName)} - ${esc(a.accountNo)}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="field-label">ประเภท</label>
+          <select class="field" onchange="state.ui.transactions.form.type=this.value">
+            <option value="income" ${f.type==='income'?'selected':''}>รายรับ</option>
+            <option value="expense" ${f.type==='expense'?'selected':''}>รายจ่าย</option>
+          </select>
+        </div>
+        <div><label class="field-label">หมวด</label>
+          <select class="field" onchange="state.ui.transactions.form.category=this.value">
+            ${CATEGORIES.map(c=>`<option ${f.category===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="field-label">จำนวนเงิน (บาท)</label><input type="number" class="field" value="${f.amount}" oninput="state.ui.transactions.form.amount=this.value"></div>
+        <div style="grid-column:1/-1;"><label class="field-label">คำอธิบาย</label><input class="field" value="${esc(f.description)}" oninput="state.ui.transactions.form.description=this.value"></div>
+        <div><label class="field-label">เลขที่อ้างอิง</label><input class="field" value="${esc(f.refNo)}" oninput="state.ui.transactions.form.refNo=this.value"></div>
+      </div>
+      <div class="row gap-2" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveTransaction()">บันทึก</button>
+        <button class="btn btn-secondary" onclick="state.ui.transactions.showForm=false;state.ui.transactions.editing=null;render();">ยกเลิก</button>
+      </div>
+    </div>` : ''}
+
+    <div class="card" style="margin-top:14px;overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายการ</th><th>หมวด</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th><th style="text-align:center;">จัดการ</th></tr></thead>
+          <tbody>
+            ${filtered.length ? filtered.map(t=>`
+              <tr>
+                <td class="muted">${thDateShort(t.date)}</td>
+                <td class="mono xsmall">${esc(t.refNo)}</td>
+                <td>${esc(t.description)}</td>
+                <td><span class="badge badge-slate">${esc(t.category)}</span></td>
+                <td style="text-align:right;color:var(--moss-600);font-weight:600;">${t.type==='income'?thb(t.amount):'-'}</td>
+                <td style="text-align:right;color:var(--rose-600);font-weight:600;">${t.type==='expense'?thb(t.amount):'-'}</td>
+                <td style="text-align:center;">
+                  <button class="icon-btn blue" onclick="editTransaction(${t.id})">${icon('edit',15)}</button>
+                  <button class="icon-btn danger" onclick="deleteTransaction(${t.id})">${icon('trash',15)}</button>
+                </td>
+              </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a396;">ยังไม่มีรายการ</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function saveTransaction(){
+  const ui = state.ui.transactions;
+  const f = ui.form;
+  if (!f.amount || !f.description) return;
+  const record = { ...f, amount: parseFloat(f.amount), facilityId: parseInt(f.facilityId), accountId: parseInt(f.accountId) };
+  if (ui.editing){
+    const updated = { ...record, id: ui.editing };
+    state.data.transactions = state.data.transactions.map(t => t.id===ui.editing ? updated : t);
+    gasUpdate('transactions', ui.editing, updated);
+  } else {
+    const rec = { ...record, id: uid(), createdAt: new Date().toISOString(), createdBy: state.auth.currentUser.username };
+    state.data.transactions.push(rec);
+    gasCreate('transactions', rec);
+  }
+  ui.showForm = false; ui.editing = null; ui.form = emptyTxForm();
+  render();
+}
+function editTransaction(id){
+  const t = state.data.transactions.find(x=>x.id===id);
+  if (!t) return;
+  state.ui.transactions.form = { ...t };
+  state.ui.transactions.editing = id;
+  state.ui.transactions.showForm = true;
+  render();
+}
+function deleteTransaction(id){
+  if (!confirm('ต้องการลบรายการนี้?')) return;
+  state.data.transactions = state.data.transactions.filter(t=>t.id!==id);
+  gasDelete('transactions', id);
+  render();
+}
+
+// เรนเดอร์เฉพาะเนื้อหาหน้า (ใช้กับช่องค้นหา เพื่อไม่ให้เสีย focus จาก full re-render โดยไม่จำเป็น -- ในที่นี้ยังคง full render แบบง่ายเพื่อความเสถียร)
+function renderPageOnly(){ render(); }
+
+// =========================================================
+// REPORTS
+// =========================================================
+const REPORT_TYPES = [
+  { id:'407', name:'แบบ 407', desc:'รายงานเงินคงเหลือประจำวัน' },
+  { id:'404', name:'แบบ 404', desc:'รายงานการรับ-จ่ายเงิน' },
+  { id:'monthly', name:'รายงานประจำเดือน', desc:'สรุปการเงินรายเดือน' },
+  { id:'yearly', name:'รายงานประจำปี', desc:'สรุปการเงินประจำปีงบประมาณ' },
+  { id:'bank', name:'สรุปยอดบัญชี', desc:'รายงานยอดเงินคงเหลือทุกบัญชี' },
+  { id:'category', name:'แยกตามหมวด', desc:'สรุปการใช้จ่ายแยกตามหมวด' },
+];
+
+function renderReports(){
+  const ui = state.ui.reports;
+  const facilities = visibleFacilities();
+  const allTrans = visibleTransactions();
+  const filteredTrans = ui.facility==='all' ? allTrans : allTrans.filter(t=>String(t.facilityId)===String(ui.facility));
+  const filteredAccounts = ui.facility==='all'
+    ? state.data.bankAccounts.filter(b=>facilities.some(f=>String(f.id)===String(b.facilityId)))
+    : state.data.bankAccounts.filter(b=>String(b.facilityId)===String(ui.facility));
+  const reportFacilities = facilities.filter(f => ui.facility==='all' || String(f.id)===String(ui.facility));
+
+  return `
+    <div class="report-grid">
+      ${REPORT_TYPES.map(r => `
+        <button class="report-card ${ui.selected===r.id?'active':''}" onclick="state.ui.reports.selected='${r.id}';render();">
+          <div class="row gap-2">
+            <div class="icon-btn" style="background:${ui.selected===r.id?'var(--moss-600)':'#eceae1'};color:${ui.selected===r.id?'#fff':'#4c5c51'};border-radius:8px;">${icon('file',18)}</div>
+            <div><div style="font-weight:600;font-size:14px;">${r.name}</div><div class="xsmall muted">${r.desc}</div></div>
+          </div>
+        </button>`).join('')}
+    </div>
+
+    <div class="card" style="padding:20px;margin-top:16px;">
+      <div class="row gap-2 no-print" style="justify-content:space-between;flex-wrap:wrap;padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--line);">
+        <div class="row gap-2">
+          <input type="date" class="field" style="width:auto;" value="${ui.date}" onchange="state.ui.reports.date=this.value;render();">
+          <select class="field" style="width:auto;" onchange="state.ui.reports.facility=this.value;render();">
+            <option value="all" ${ui.facility==='all'?'selected':''}>ทุกสถานบริการ</option>
+            ${facilities.map(f=>`<option value="${f.id}" ${String(ui.facility)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="row gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="window.print()">${icon('print',15)} พิมพ์</button>
+          <button class="btn" style="background:var(--rose-600);color:#fff;" onclick="handleDownloadPDF()" ${ui.exporting?'disabled':''}>
+            ${ui.exporting?icon('loader',15):icon('download',15)} ${ui.exporting?'กำลังสร้าง PDF...':'ดาวน์โหลด PDF'}
+          </button>
+        </div>
+      </div>
+
+      ${ui.exportError ? `<div class="toast toast-err" style="margin-bottom:12px;">${esc(ui.exportError)}</div>` : ''}
+
+      <div id="report-content" style="background:#fff;padding:10px;">
+        ${renderReportBody(ui.selected, ui.date, reportFacilities, filteredTrans, filteredAccounts)}
+      </div>
+    </div>
+  `;
+}
+
+function reportHeader(title, subtitle){
+  return `<div style="text-align:center;margin-bottom:22px;border-bottom:2px solid #1c2b22;padding-bottom:14px;">
+    <h2 style="margin:0;font-size:19px;">${title}</h2>
+    ${subtitle?`<p style="margin:4px 0 0;font-size:13px;color:#333;">${subtitle}</p>`:''}
+  </div>`;
+}
+function signatures(){
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:60px;text-align:center;font-size:13px;">
+    ${['ผู้จัดทำ','ผู้ตรวจสอบ','ผู้อนุมัติ'].map(role=>`
+    <div><div style="border-top:1px solid #94a396;margin-top:60px;padding-top:6px;">
+      <p style="margin:0;">(...........................................)</p><p style="margin:2px 0 0;">${role}</p>
+    </div></div>`).join('')}
+  </div>`;
+}
+
+function renderReportBody(type, date, facilities, trans, accounts){
+  if (type==='407') return report407(date, facilities, trans, accounts);
+  if (type==='404') return report404(date, trans);
+  if (type==='bank') return reportBank(date, accounts, facilities);
+  if (type==='monthly') return reportMonthly(date, trans);
+  if (type==='yearly') return reportYearly(trans, state.data.fiscalYears.find(f=>f.isActive));
+  if (type==='category') return reportCategory(trans);
+  return '';
+}
+
+function report407(date, facilities, trans, accounts){
+  const daily = trans.filter(t=>t.date===date);
+  const totalIncome = daily.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalExpense = daily.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalBalance = accounts.reduce((s,a)=>s+Number(a.balance||0),0);
+  const rows = accounts.map(a=>{
+    const f = facilities.find(x=>String(x.id)===String(a.facilityId));
+    const accIn = daily.filter(t=>String(t.accountId)===String(a.id)&&t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+    const accEx = daily.filter(t=>String(t.accountId)===String(a.id)&&t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+    const opening = Number(a.balance||0) - accIn + accEx;
+    return `<tr>
+      <td>${esc(a.bankName)} ${esc(a.accountNo)}<br><span style="font-size:11px;color:#666;">${esc(f?f.name:'')}</span></td>
+      <td style="text-align:right;">${opening.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      <td style="text-align:right;">${accIn.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      <td style="text-align:right;">${accEx.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      <td style="text-align:right;font-weight:600;">${Number(a.balance).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
+  return reportHeader('รายงานเงินคงเหลือประจำวัน (แบบ 407)', `${facilities.map(f=>f.name).join(', ')} | วันที่ ${thDate(date)}`) + `
+    <table><thead><tr><th>รายการ</th><th style="text-align:right;">ยอดยกมา</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th><th style="text-align:right;">คงเหลือ</th></tr></thead>
+    <tbody>${rows}
+      <tr style="background:#e2f2e7;font-weight:700;">
+        <td>รวมทั้งสิ้น</td>
+        <td style="text-align:right;">${(totalBalance-totalIncome+totalExpense).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalIncome.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalExpense.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalBalance.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      </tr>
+    </tbody></table>` + signatures();
+}
+
+function report404(date, trans){
+  const month = date.substring(0,7);
+  const monthTrans = trans.filter(t=>String(t.date).startsWith(month));
+  const totalIn = monthTrans.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalEx = monthTrans.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+  const rows = monthTrans.map(t=>`<tr>
+    <td>${thDateShort(t.date)}</td><td style="font-size:11px;">${esc(t.refNo)}</td><td>${esc(t.description)}</td><td style="font-size:12px;">${esc(t.category)}</td>
+    <td style="text-align:right;">${t.type==='income'?Number(t.amount).toLocaleString(undefined,{minimumFractionDigits:2}):'-'}</td>
+    <td style="text-align:right;">${t.type==='expense'?Number(t.amount).toLocaleString(undefined,{minimumFractionDigits:2}):'-'}</td>
+  </tr>`).join('');
+  return reportHeader('รายงานการรับ-จ่ายเงิน (แบบ 404)', `ประจำเดือน ${new Date(date).toLocaleDateString('th-TH',{year:'numeric',month:'long'})}`) + `
+    <table><thead><tr><th>วันที่</th><th>เลขที่</th><th>รายการ</th><th>หมวด</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th></tr></thead>
+    <tbody>${rows}
+      <tr style="background:#e2f2e7;font-weight:700;"><td colspan="4" style="text-align:right;">รวม</td>
+        <td style="text-align:right;">${totalIn.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalEx.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      </tr>
+    </tbody></table>` + signatures();
+}
+
+function reportBank(date, accounts, facilities){
+  const total = accounts.reduce((s,a)=>s+Number(a.balance||0),0);
+  const rows = accounts.map(a=>{
+    const f = facilities.find(x=>String(x.id)===String(a.facilityId));
+    return `<tr><td>${esc(f?f.name:'')}</td><td>${esc(a.bankName)}</td><td class="mono">${esc(a.accountNo)}</td><td>${esc(a.accountType)}</td>
+      <td style="text-align:right;font-weight:600;">${Number(a.balance).toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>`;
+  }).join('');
+  return reportHeader('รายงานยอดเงินคงเหลือทุกบัญชี', `ณ วันที่ ${thDate(date)}`) + `
+    <table><thead><tr><th>สถานบริการ</th><th>ธนาคาร</th><th>เลขที่บัญชี</th><th>ประเภท</th><th style="text-align:right;">ยอดคงเหลือ</th></tr></thead>
+    <tbody>${rows}
+      <tr style="background:#e2f2e7;font-weight:700;"><td colspan="4" style="text-align:right;">รวมทั้งสิ้น</td><td style="text-align:right;">${total.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+    </tbody></table>` + signatures();
+}
+
+function reportMonthly(date, trans){
+  const month = date.substring(0,7);
+  const monthTrans = trans.filter(t=>String(t.date).startsWith(month));
+  const byCat = {};
+  monthTrans.forEach(t=>{ if(!byCat[t.category]) byCat[t.category]={income:0,expense:0}; if(t.type==='income') byCat[t.category].income+=Number(t.amount||0); else byCat[t.category].expense+=Number(t.amount||0); });
+  const totalIn = monthTrans.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalEx = monthTrans.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+  const rows = Object.entries(byCat).map(([cat,v])=>`<tr><td>${esc(cat)}</td>
+    <td style="text-align:right;">${v.income.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    <td style="text-align:right;">${v.expense.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    <td style="text-align:right;">${(v.income-v.expense).toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>`).join('');
+  return reportHeader('รายงานการเงินประจำเดือน', `เดือน ${new Date(date).toLocaleDateString('th-TH',{year:'numeric',month:'long'})}`) + `
+    <table><thead><tr><th>หมวด</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th><th style="text-align:right;">สุทธิ</th></tr></thead>
+    <tbody>${rows}
+      <tr style="background:#e2f2e7;font-weight:700;"><td>รวม</td>
+        <td style="text-align:right;">${totalIn.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalEx.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${(totalIn-totalEx).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      </tr>
+    </tbody></table>` + signatures();
+}
+
+function reportYearly(trans, fiscalYear){
+  const months = ['ต.ค.','พ.ย.','ธ.ค.','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.'];
+  const byMonth = {}; months.forEach(m=>byMonth[m]={income:0,expense:0});
+  trans.forEach(t=>{ const d=new Date(t.date); const idx=(d.getMonth()+3)%12; const m=months[idx];
+    if (t.type==='income') byMonth[m].income += Number(t.amount||0); else byMonth[m].expense += Number(t.amount||0); });
+  const totalIn = trans.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalEx = trans.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+  const rows = months.map(m=>`<tr><td>${m}</td>
+    <td style="text-align:right;">${byMonth[m].income.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    <td style="text-align:right;">${byMonth[m].expense.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    <td style="text-align:right;">${(byMonth[m].income-byMonth[m].expense).toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>`).join('');
+  return reportHeader('รายงานการเงินประจำปีงบประมาณ', `ปีงบประมาณ ${fiscalYear?fiscalYear.year:'-'}`) + `
+    <table><thead><tr><th>เดือน</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th><th style="text-align:right;">สุทธิ</th></tr></thead>
+    <tbody>${rows}
+      <tr style="background:#e2f2e7;font-weight:700;"><td>รวมทั้งปี</td>
+        <td style="text-align:right;">${totalIn.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${totalEx.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;">${(totalIn-totalEx).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+      </tr>
+    </tbody></table>` + signatures();
+}
+
+function reportCategory(trans){
+  const byCat = {};
+  trans.forEach(t=>{ if(!byCat[t.category]) byCat[t.category]={income:0,expense:0,count:0};
+    if (t.type==='income') byCat[t.category].income+=Number(t.amount||0); else byCat[t.category].expense+=Number(t.amount||0);
+    byCat[t.category].count++; });
+  const rows = Object.entries(byCat).map(([cat,v])=>`<tr><td>${esc(cat)}</td><td style="text-align:center;">${v.count}</td>
+    <td style="text-align:right;">${v.income.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+    <td style="text-align:right;">${v.expense.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>`).join('');
+  return reportHeader('สรุปการรับ-จ่ายแยกตามหมวด', `ข้อมูล ณ วันที่ ${thDate(new Date().toISOString())}`) + `
+    <table><thead><tr><th>หมวด</th><th style="text-align:center;">จำนวนรายการ</th><th style="text-align:right;">รายรับ</th><th style="text-align:right;">รายจ่าย</th></tr></thead>
+    <tbody>${rows}</tbody></table>` + signatures();
+}
+
+async function handleDownloadPDF(){
+  state.ui.reports.exporting = true; state.ui.reports.exportError = ''; render();
+  try{
+    const rname = REPORT_TYPES.find(r=>r.id===state.ui.reports.selected)?.name || 'report';
+    await exportElementToPDF('report-content', `รายงาน_${rname}_${state.ui.reports.date}.pdf`);
+  } catch(err){
+    state.ui.reports.exportError = 'เกิดข้อผิดพลาด: ' + err.message;
+  } finally {
+    state.ui.reports.exporting = false; render();
+  }
+}
+
+// =========================================================
+// FACILITIES
+// =========================================================
+function emptyFacilityForm(){ return { code:'', name:'', type:'รพ.สต.', address:'', phone:'' }; }
+function renderFacilities(){
+  const ui = state.ui.facilities;
+  if (!ui.form || Object.keys(ui.form).length===0) ui.form = emptyFacilityForm();
+  const f = ui.form;
+  const list = state.data.facilities;
+  return `
+    <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:14.5px;color:#4c5c51;">จำนวนสถานบริการ: ${list.length}</h3>
+      <button class="btn btn-primary btn-sm" onclick="state.ui.facilities.showForm=true;state.ui.facilities.editing=null;state.ui.facilities.form=emptyFacilityForm();render();">${icon('plus',15)} เพิ่ม</button>
+    </div>
+    ${ui.showForm ? `
+    <div class="modal-form" style="margin-bottom:14px;">
+      <h3 style="margin:0 0 14px;font-size:15px;">${ui.editing?'แก้ไข':'เพิ่ม'}สถานบริการ</h3>
+      <div class="form-grid">
+        <input class="field" placeholder="รหัส" value="${esc(f.code)}" oninput="state.ui.facilities.form.code=this.value">
+        <select class="field" onchange="state.ui.facilities.form.type=this.value">
+          ${['รพ.สต.','สสอ.','โรงพยาบาล'].map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <input class="field" style="grid-column:1/-1;" placeholder="ชื่อสถานบริการ" value="${esc(f.name)}" oninput="state.ui.facilities.form.name=this.value">
+        <input class="field" placeholder="ที่อยู่" value="${esc(f.address)}" oninput="state.ui.facilities.form.address=this.value">
+        <input class="field" placeholder="เบอร์โทร" value="${esc(f.phone)}" oninput="state.ui.facilities.form.phone=this.value">
+      </div>
+      <div class="row gap-2" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveFacility()">บันทึก</button>
+        <button class="btn btn-secondary" onclick="state.ui.facilities.showForm=false;render();">ยกเลิก</button>
+      </div>
+    </div>` : ''}
+    <div class="card" style="overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>ที่อยู่</th><th>เบอร์โทร</th><th style="text-align:center;">จัดการ</th></tr></thead>
+          <tbody>
+            ${list.map(fc=>`
+              <tr>
+                <td class="mono xsmall">${esc(fc.code)}</td>
+                <td style="font-weight:600;">${esc(fc.name)}</td>
+                <td><span class="badge badge-green">${esc(fc.type)}</span></td>
+                <td class="muted">${esc(fc.address)}</td>
+                <td class="muted">${esc(fc.phone)}</td>
+                <td style="text-align:center;">
+                  <button class="icon-btn blue" onclick="editFacility(${fc.id})">${icon('edit',15)}</button>
+                  <button class="icon-btn danger" onclick="deleteFacility(${fc.id})">${icon('trash',15)}</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+function saveFacility(){
+  const ui = state.ui.facilities; const f = ui.form;
+  if (!f.name) return;
+  if (ui.editing){
+    const updated = { ...f, id: ui.editing };
+    state.data.facilities = state.data.facilities.map(x=>x.id===ui.editing?updated:x);
+    gasUpdate('facilities', ui.editing, updated);
+  } else {
+    const rec = { ...f, id: uid() };
+    state.data.facilities.push(rec);
+    gasCreate('facilities', rec);
+  }
+  ui.showForm=false; ui.editing=null; ui.form=emptyFacilityForm(); render();
+}
+function editFacility(id){
+  const fc = state.data.facilities.find(x=>x.id===id); if(!fc) return;
+  state.ui.facilities.form = { ...fc }; state.ui.facilities.editing = id; state.ui.facilities.showForm = true; render();
+}
+function deleteFacility(id){
+  if (!confirm('ลบสถานบริการนี้?')) return;
+  state.data.facilities = state.data.facilities.filter(x=>x.id!==id);
+  gasDelete('facilities', id); render();
+}
+
+// =========================================================
+// FISCAL YEARS
+// =========================================================
+function renderFiscalYears(){
+  const ui = state.ui.fiscalyears;
+  const list = state.data.fiscalYears;
+  return `
+    <div class="card row gap-2" style="padding:14px 16px;margin-bottom:14px;background:var(--blue-100);border-color:#c7dcef;">
+      ${icon('alert',18)}
+      <div><p style="margin:0;font-weight:600;font-size:13.5px;">ปีงบประมาณไทย</p>
+      <p class="xsmall muted" style="margin:2px 0 0;">เริ่ม 1 ตุลาคม - 30 กันยายน | ตัวอย่าง: ปีงบ 2569 = 1 ต.ค. 2568 - 30 ก.ย. 2569</p></div>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:14.5px;color:#4c5c51;">ปีงบประมาณทั้งหมด: ${list.length}</h3>
+      <button class="btn btn-primary btn-sm" onclick="state.ui.fiscalyears.showForm=true;state.ui.fiscalyears.form={year:''};render();">${icon('plus',15)} เพิ่ม</button>
+    </div>
+    ${ui.showForm ? `
+    <div class="modal-form" style="margin-bottom:14px;">
+      <h3 style="margin:0 0 14px;font-size:15px;">เพิ่มปีงบประมาณ</h3>
+      <input type="number" class="field" style="width:200px;" placeholder="ปี พ.ศ. (เช่น 2569)" value="${ui.form.year||''}" oninput="state.ui.fiscalyears.form.year=this.value">
+      <div class="row gap-2" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveFiscalYear()">บันทึก</button>
+        <button class="btn btn-secondary" onclick="state.ui.fiscalyears.showForm=false;render();">ยกเลิก</button>
+      </div>
+    </div>` : ''}
+    <div class="report-grid">
+      ${list.map(fy=>`
+        <div class="card" style="padding:18px;${fy.isActive?'border-color:var(--moss-500);background:#f0f7f2;':''}">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+            <div><p class="xsmall muted" style="margin:0;">ปีงบประมาณ</p><h3 style="margin:0;font-size:26px;">${fy.year}</h3></div>
+            ${fy.isActive?`<span class="badge badge-green row gap-1" style="display:inline-flex;">${icon('check',12)} ใช้งาน</span>`:''}
+          </div>
+          <div class="xsmall muted col gap-1">
+            <p style="margin:0;">เริ่ม: ${thDate(fy.startDate)}</p>
+            <p style="margin:0;">สิ้นสุด: ${thDate(fy.endDate)}</p>
+          </div>
+          ${!fy.isActive?`<button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-top:10px;" onclick="setActiveFiscalYear(${fy.id})">เลือกใช้งาน</button>`:''}
+        </div>`).join('')}
+    </div>
+  `;
+}
+function saveFiscalYear(){
+  const y = parseInt(state.ui.fiscalyears.form.year);
+  if (!y) return;
+  const rec = { id: uid(), year:y, startDate:`${y-544}-10-01`, endDate:`${y-543}-09-30`, isActive:false };
+  state.data.fiscalYears.push(rec);
+  gasCreate('fiscalyears', rec);
+  state.ui.fiscalyears.showForm=false; render();
+}
+function setActiveFiscalYear(id){
+  state.data.fiscalYears = state.data.fiscalYears.map(f=>({...f, isActive: f.id===id}));
+  state.data.fiscalYears.forEach(f=>gasUpdate('fiscalyears', f.id, f));
+  render();
+}
+
+// =========================================================
+// BANK ACCOUNTS
+// =========================================================
+function emptyAccForm(){ const facilities=visibleFacilities(); return { facilityId: facilities[0]?.id||1, bankName:'', accountNo:'', accountName:'', accountType:'ออมทรัพย์', balance:0 }; }
+function renderBankAccounts(){
+  const ui = state.ui.bankaccounts;
+  const facilities = visibleFacilities();
+  if (!ui.form || Object.keys(ui.form).length===0) ui.form = emptyAccForm();
+  const f = ui.form;
+  const visible = state.data.bankAccounts.filter(a=>facilities.some(fc=>String(fc.id)===String(a.facilityId)));
+  const total = visible.reduce((s,a)=>s+Number(a.balance||0),0);
+  return `
+    <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+      <div><h3 style="margin:0;font-size:14.5px;color:#4c5c51;">บัญชีธนาคารทั้งหมด: ${visible.length}</h3>
+        <p class="xsmall muted" style="margin:2px 0 0;">ยอดรวม: ${thb(total)}</p></div>
+      <button class="btn btn-primary btn-sm" onclick="state.ui.bankaccounts.showForm=true;state.ui.bankaccounts.editing=null;state.ui.bankaccounts.form=emptyAccForm();render();">${icon('plus',15)} เพิ่มบัญชี</button>
+    </div>
+    ${ui.showForm ? `
+    <div class="modal-form" style="margin-bottom:14px;">
+      <h3 style="margin:0 0 14px;font-size:15px;">${ui.editing?'แก้ไข':'เพิ่ม'}บัญชีธนาคาร</h3>
+      <div class="form-grid">
+        <select class="field" onchange="state.ui.bankaccounts.form.facilityId=this.value">
+          ${facilities.map(fc=>`<option value="${fc.id}" ${String(f.facilityId)===String(fc.id)?'selected':''}>${esc(fc.name)}</option>`).join('')}
+        </select>
+        <select class="field" onchange="state.ui.bankaccounts.form.accountType=this.value">
+          ${['ออมทรัพย์','กระแสรายวัน','ฝากประจำ'].map(t=>`<option ${f.accountType===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <input class="field" placeholder="ชื่อธนาคาร" value="${esc(f.bankName)}" oninput="state.ui.bankaccounts.form.bankName=this.value">
+        <input class="field" placeholder="เลขที่บัญชี" value="${esc(f.accountNo)}" oninput="state.ui.bankaccounts.form.accountNo=this.value">
+        <input class="field" placeholder="ชื่อบัญชี" value="${esc(f.accountName)}" oninput="state.ui.bankaccounts.form.accountName=this.value">
+        <input type="number" class="field" placeholder="ยอดเงินเริ่มต้น" value="${f.balance}" oninput="state.ui.bankaccounts.form.balance=this.value">
+      </div>
+      <div class="row gap-2" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveBankAccount()">บันทึก</button>
+        <button class="btn btn-secondary" onclick="state.ui.bankaccounts.showForm=false;render();">ยกเลิก</button>
+      </div>
+    </div>` : ''}
+    <div class="report-grid">
+      ${visible.map(a=>{
+        const fc = facilities.find(x=>String(x.id)===String(a.facilityId));
+        return `<div class="bank-tile">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:14px;position:relative;">
+            <div><p class="xsmall" style="margin:0;opacity:.65;">${esc(fc?fc.name:'')}</p><p style="margin:0;font-weight:700;">${esc(a.bankName)}</p></div>
+            <span class="xsmall" style="background:rgba(255,255,255,.16);padding:3px 9px;border-radius:99px;">${esc(a.accountType)}</span>
+          </div>
+          <p class="mono" style="margin:0 0 6px;font-size:16px;letter-spacing:.05em;position:relative;">${esc(a.accountNo)}</p>
+          <p class="xsmall" style="margin:0 0 16px;opacity:.65;position:relative;">${esc(a.accountName)}</p>
+          <div class="row" style="justify-content:space-between;align-items:flex-end;position:relative;">
+            <div><p class="xsmall" style="margin:0;opacity:.65;">ยอดคงเหลือ</p><p style="margin:0;font-size:21px;font-weight:700;">${thb(a.balance)}</p></div>
+            <div class="row gap-1">
+              <button class="icon-btn" style="color:#fff;" onclick="editBankAccount(${a.id})">${icon('edit',15)}</button>
+              <button class="icon-btn" style="color:#fff;" onclick="deleteBankAccount(${a.id})">${icon('trash',15)}</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+function saveBankAccount(){
+  const ui = state.ui.bankaccounts; const f = ui.form;
+  if (!f.bankName || !f.accountNo) return;
+  const data = { ...f, facilityId: parseInt(f.facilityId), balance: parseFloat(f.balance) };
+  if (ui.editing){
+    const updated = { ...data, id: ui.editing };
+    state.data.bankAccounts = state.data.bankAccounts.map(x=>x.id===ui.editing?updated:x);
+    gasUpdate('bankaccounts', ui.editing, updated);
+  } else {
+    const rec = { ...data, id: uid() };
+    state.data.bankAccounts.push(rec);
+    gasCreate('bankaccounts', rec);
+  }
+  ui.showForm=false; ui.editing=null; ui.form=emptyAccForm(); render();
+}
+function editBankAccount(id){
+  const a = state.data.bankAccounts.find(x=>x.id===id); if(!a) return;
+  state.ui.bankaccounts.form = { ...a }; state.ui.bankaccounts.editing = id; state.ui.bankaccounts.showForm = true; render();
+}
+function deleteBankAccount(id){
+  if (!confirm('ลบบัญชีนี้?')) return;
+  state.data.bankAccounts = state.data.bankAccounts.filter(x=>x.id!==id);
+  gasDelete('bankaccounts', id); render();
+}
+
+// =========================================================
+// STAFF
+// =========================================================
+function emptyStaffForm(){ const facilities=visibleFacilities(); return { facilityId: facilities[0]?.id||1, name:'', position:'', idCard:'', phone:'' }; }
+function renderStaff(){
+  const ui = state.ui.staff;
+  const facilities = visibleFacilities();
+  if (!ui.form || Object.keys(ui.form).length===0) ui.form = emptyStaffForm();
+  const f = ui.form;
+  const visible = state.data.staff.filter(s=>facilities.some(fc=>String(fc.id)===String(s.facilityId)));
+  return `
+    <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:14.5px;color:#4c5c51;">บุคลากรทั้งหมด: ${visible.length} คน</h3>
+      <button class="btn btn-primary btn-sm" onclick="state.ui.staff.showForm=true;state.ui.staff.editing=null;state.ui.staff.form=emptyStaffForm();render();">${icon('plus',15)} เพิ่ม</button>
+    </div>
+    ${ui.showForm ? `
+    <div class="modal-form" style="margin-bottom:14px;">
+      <h3 style="margin:0 0 14px;font-size:15px;">${ui.editing?'แก้ไข':'เพิ่ม'}บุคลากร</h3>
+      <div class="form-grid">
+        <select class="field" style="grid-column:1/-1;" onchange="state.ui.staff.form.facilityId=this.value">
+          ${facilities.map(fc=>`<option value="${fc.id}" ${String(f.facilityId)===String(fc.id)?'selected':''}>${esc(fc.name)}</option>`).join('')}
+        </select>
+        <input class="field" placeholder="ชื่อ-นามสกุล" value="${esc(f.name)}" oninput="state.ui.staff.form.name=this.value">
+        <input class="field" placeholder="ตำแหน่ง" value="${esc(f.position)}" oninput="state.ui.staff.form.position=this.value">
+        <input class="field" placeholder="เลขบัตรประชาชน" value="${esc(f.idCard)}" oninput="state.ui.staff.form.idCard=this.value">
+        <input class="field" placeholder="เบอร์โทร" value="${esc(f.phone)}" oninput="state.ui.staff.form.phone=this.value">
+      </div>
+      <div class="row gap-2" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveStaff()">บันทึก</button>
+        <button class="btn btn-secondary" onclick="state.ui.staff.showForm=false;render();">ยกเลิก</button>
+      </div>
+    </div>` : ''}
+    <div class="card" style="overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>ชื่อ-นามสกุล</th><th>ตำแหน่ง</th><th>สถานบริการ</th><th>เลขบัตร</th><th>เบอร์โทร</th><th style="text-align:center;">จัดการ</th></tr></thead>
+          <tbody>
+            ${visible.map(s=>{
+              const fc = facilities.find(x=>String(x.id)===String(s.facilityId));
+              return `<tr>
+                <td><div class="row gap-2"><div class="avatar" style="width:28px;height:28px;font-size:11px;">${esc(s.name.charAt(0))}</div>${esc(s.name)}</div></td>
+                <td class="muted">${esc(s.position)}</td>
+                <td class="xsmall muted">${esc(fc?fc.name:'')}</td>
+                <td class="mono xsmall">${esc(s.idCard)}</td>
+                <td class="muted">${esc(s.phone)}</td>
+                <td style="text-align:center;">
+                  <button class="icon-btn blue" onclick="editStaff(${s.id})">${icon('edit',15)}</button>
+                  <button class="icon-btn danger" onclick="deleteStaff(${s.id})">${icon('trash',15)}</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+function saveStaff(){
+  const ui = state.ui.staff; const f = ui.form;
+  if (!f.name) return;
+  const data = { ...f, facilityId: parseInt(f.facilityId) };
+  if (ui.editing){
+    const updated = { ...data, id: ui.editing };
+    state.data.staff = state.data.staff.map(x=>x.id===ui.editing?updated:x);
+    gasUpdate('staff', ui.editing, updated);
+  } else {
+    const rec = { ...data, id: uid() };
+    state.data.staff.push(rec);
+    gasCreate('staff', rec);
+  }
+  ui.showForm=false; ui.editing=null; ui.form=emptyStaffForm(); render();
+}
+function editStaff(id){
+  const s = state.data.staff.find(x=>x.id===id); if(!s) return;
+  state.ui.staff.form = { ...s }; state.ui.staff.editing = id; state.ui.staff.showForm = true; render();
+}
+function deleteStaff(id){
+  if (!confirm('ลบบุคลากรนี้?')) return;
+  state.data.staff = state.data.staff.filter(x=>x.id!==id);
+  gasDelete('staff', id); render();
+}
+
+// =========================================================
+// SETTINGS
+// =========================================================
+function renderSettings(){
+  const s = state.ui.settings;
+  if (s.tempUrl === undefined || s.tempUrl === '') s.tempUrl = state.gas.url;
+  const status = state.gas.status;
+  return `
+    <div class="card" style="padding:22px;">
+      <h3 class="row gap-2" style="margin:0 0 3px;font-size:15.5px;">${icon('database',18)} การเชื่อมต่อ Google Sheets</h3>
+      <p class="xsmall muted" style="margin:0 0 16px;">บันทึกข้อมูลทั้งหมดอัตโนมัติไปยัง Google Sheets ผ่าน Apps Script</p>
+
+      <label class="field-label">Google Apps Script Web App URL</label>
+      <input id="settings-gas-url" class="field mono xsmall" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(s.tempUrl)}" oninput="state.ui.settings.tempUrl=this.value">
+      <p class="xsmall muted" style="margin:6px 0 14px;">ⓘ วิธีสร้าง: เปิด Google Sheet → Extensions → Apps Script → วางโค้ด Code.gs → Deploy → Web app</p>
+
+      <div class="row gap-2" style="padding:12px;border-radius:9px;margin-bottom:14px;background:${status==='connected'?'#e2f2e7':status==='syncing'?'var(--blue-100)':status==='error'?'var(--rose-100)':'#eceae1'};">
+        ${status==='connected'?icon('check',18):status==='syncing'?icon('loader',18):status==='error'?icon('alert',18):icon('alert',18)}
+        <div>
+          <p style="margin:0;font-weight:600;font-size:13.5px;">
+            ${status==='connected'?'เชื่อมต่อสำเร็จ':status==='syncing'?'กำลังซิงค์ข้อมูล...':status==='error'?'เชื่อมต่อไม่สำเร็จ':'ยังไม่ได้เชื่อมต่อ'}
+          </p>
+          ${state.gas.message?`<p class="xsmall muted" style="margin:0;">${esc(state.gas.message)}</p>`:''}
+        </div>
+      </div>
+
+      <div class="row gap-2" style="flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="applyGasUrl(document.getElementById('settings-gas-url').value);render();">บันทึก URL</button>
+        <button class="btn" style="background:var(--blue-600);color:#fff;" ${!state.gas.url?'disabled':''} onclick="syncAllFromGAS()">${icon('refresh',15)} ดึงข้อมูลจาก Sheets</button>
+        <button class="btn" style="background:#1c2b22;color:#fff;" ${!state.gas.url?'disabled':''} onclick="pushAllToGAS()">${icon('cloud',15)} อัพโหลดทั้งหมดขึ้น Sheets</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:18px;margin-top:14px;background:var(--gold-100);border-color:#e3cf9d;">
+      <h4 class="row gap-2" style="margin:0 0 10px;font-size:14px;color:#6b4d1c;">${icon('alert',17)} วิธีติดตั้ง Backend (Google Apps Script)</h4>
+      <ol style="margin:0;padding-left:20px;font-size:13px;color:#6b4d1c;line-height:1.9;">
+        <li>เปิด <a href="https://sheets.new" target="_blank" style="text-decoration:underline;font-weight:600;">Google Sheet ใหม่</a></li>
+        <li>เมนู <strong>Extensions → Apps Script</strong></li>
+        <li>คัดลอกโค้ดจากไฟล์ <code>Code.gs</code> วางในหน้าต่าง</li>
+        <li>กดบันทึก (Ctrl+S) → รันฟังก์ชัน <code>setup</code> ครั้งแรก (ระบบจะขอสิทธิ์)</li>
+        <li><strong>Deploy → New deployment → Web app</strong> → Execute as: Me, Who has access: Anyone</li>
+        <li>คัดลอก <strong>Web app URL</strong> มาใส่ในช่องด้านบน</li>
+      </ol>
+    </div>
+  `;
+}
+
+// =========================================================
+// GAS SYNC ACTIONS
+// =========================================================
+async function gasCreate(entity, data){
+  if (!state.gas.client) return;
+  state.gas.status='syncing'; render();
+  try{ await state.gas.client.create(entity, data); state.gas.status='connected'; }
+  catch(e){ state.gas.status='error'; }
+  render();
+}
+async function gasUpdate(entity, id, data){
+  if (!state.gas.client) return;
+  state.gas.status='syncing'; render();
+  try{ await state.gas.client.update(entity, id, data); state.gas.status='connected'; }
+  catch(e){ state.gas.status='error'; }
+  render();
+}
+async function gasDelete(entity, id){
+  if (!state.gas.client) return;
+  state.gas.status='syncing'; render();
+  try{ await state.gas.client.delete(entity, id); state.gas.status='connected'; }
+  catch(e){ state.gas.status='error'; }
+  render();
+}
+async function syncAllFromGAS(){
+  if (!state.gas.client) return;
+  state.gas.status='syncing'; state.gas.message='กำลังโหลดข้อมูล...'; render();
+  try{
+    const res = await state.gas.client.loadAll();
+    if (res.success){
+      if (res.data.facilities?.length) state.data.facilities = res.data.facilities;
+      if (res.data.fiscalyears?.length) state.data.fiscalYears = res.data.fiscalyears;
+      if (res.data.bankaccounts?.length) state.data.bankAccounts = res.data.bankaccounts;
+      if (res.data.staff?.length) state.data.staff = res.data.staff;
+      if (res.data.transactions?.length) state.data.transactions = res.data.transactions;
+      state.gas.status='connected'; state.gas.message='ซิงค์ข้อมูลสำเร็จ';
+      render();
+      setTimeout(()=>{ state.gas.message=''; render(); }, 3000);
+    } else {
+      state.gas.status='error'; state.gas.message='เกิดข้อผิดพลาด: ' + res.message; render();
+    }
+  } catch(e){
+    state.gas.status='error'; state.gas.message='เชื่อมต่อไม่ได้: ' + e.message; render();
+  }
+}
+async function pushAllToGAS(){
+  if (!state.gas.client) return;
+  state.gas.status='syncing'; state.gas.message='กำลังอัพโหลดข้อมูล...'; render();
+  try{
+    await state.gas.client.bulkSync('facilities', state.data.facilities);
+    await state.gas.client.bulkSync('fiscalyears', state.data.fiscalYears);
+    await state.gas.client.bulkSync('bankaccounts', state.data.bankAccounts);
+    await state.gas.client.bulkSync('staff', state.data.staff);
+    await state.gas.client.bulkSync('transactions', state.data.transactions);
+    state.gas.status='connected'; state.gas.message='อัพโหลดข้อมูลสำเร็จ'; render();
+    setTimeout(()=>{ state.gas.message=''; render(); }, 3000);
+  } catch(e){
+    state.gas.status='error'; state.gas.message='อัพโหลดไม่สำเร็จ: ' + e.message; render();
+  }
+}
+
+// ---------- INIT ----------
+render();
+</script>
+</body>
+</html>
