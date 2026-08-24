@@ -1,0 +1,580 @@
+<script>
+/* =============================================================================
+   HRM :: Core.html
+   สะพานเรียก API, ตัวช่วยจัดรูปแบบ, ตัวช่วยสร้าง DOM, toast, modal, ฟอร์ม
+   ============================================================================= */
+
+/** เรียก API ฝั่ง server — คืน Promise เสมอ */
+function api(action, payload) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (!res) return reject(new Error('ไม่ได้รับข้อมูลตอบกลับ'));
+        if (res.ok) return resolve(res.data);
+        reject(new Error(res.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ'));
+      })
+      .withFailureHandler(function (err) {
+        reject(new Error((err && err.message) || String(err)));
+      })
+      .api(action, payload || {});
+  });
+}
+
+/** เรียก API พร้อมจัดการ error เป็น toast ให้เลย */
+function apiSafe(action, payload, opts) {
+  opts = opts || {};
+  return api(action, payload).catch(function (e) {
+    if (!opts.silent) Toast.error(e.message);
+    if (opts.rethrow) throw e;
+    return opts.fallback === undefined ? null : opts.fallback;
+  });
+}
+
+/* ------------------------------------------------------------------ Store */
+const Store = {
+  boot: null,
+  perms: {},
+  cache: {},
+
+  can: function (perm) {
+    if (!perm) return true;
+    return !!(this.perms['*'] || this.perms[perm]);
+  },
+  canAny: function (list) {
+    const self = this;
+    return (list || []).some(function (p) { return self.can(p); });
+  },
+  setBoot: function (b) {
+    this.boot = b;
+    this.perms = {};
+    (b.perms || []).forEach(function (p) { Store.perms[p] = true; });
+  },
+  /** โหลดตัวเลือก dropdown ครั้งเดียวแล้วเก็บไว้ */
+  options: function () {
+    if (this.cache.options) return Promise.resolve(this.cache.options);
+    return api('employee.options').then(function (o) {
+      Store.cache.options = o;
+      return o;
+    });
+  }
+};
+
+/* ------------------------------------------------------------------ Format */
+const Fmt = {
+  TH_MONTHS: ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
+              'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'],
+  TH_SHORT: ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.',
+             'ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'],
+
+  date: function (v, short) {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    const m = short ? this.TH_SHORT : this.TH_MONTHS;
+    return d.getDate() + ' ' + m[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+  },
+
+  dateTime: function (v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return this.date(v, true) + ' ' +
+      String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  },
+
+  time: function (v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v).slice(0, 5);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  },
+
+  month: function (v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    return this.TH_MONTHS[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+  },
+
+  /** เวลาที่ผ่านมาแบบสั้น */
+  ago: function (v) {
+    if (!v) return '';
+    const diff = (Date.now() - new Date(v).getTime()) / 1000;
+    if (diff < 60) return 'เมื่อสักครู่';
+    if (diff < 3600) return Math.floor(diff / 60) + ' นาทีที่แล้ว';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' ชั่วโมงที่แล้ว';
+    if (diff < 2592000) return Math.floor(diff / 86400) + ' วันที่แล้ว';
+    return this.date(v, true);
+  },
+
+  money: function (v, digits) {
+    const n = Number(v || 0);
+    return n.toLocaleString('th-TH', {
+      minimumFractionDigits: digits === undefined ? 2 : digits,
+      maximumFractionDigits: digits === undefined ? 2 : digits
+    });
+  },
+
+  num: function (v) {
+    return Number(v || 0).toLocaleString('th-TH');
+  },
+
+  minutes: function (m) {
+    const v = Math.max(0, Math.round(Number(m || 0)));
+    if (!v) return '—';
+    const h = Math.floor(v / 60);
+    return (h ? h + ' ชม. ' : '') + (v % 60 ? (v % 60) + ' น.' : '');
+  },
+
+  percent: function (v, digits) {
+    return Number(v || 0).toFixed(digits === undefined ? 1 : digits) + '%';
+  },
+
+  /** ตัวย่อชื่อสำหรับ avatar */
+  initials: function (name) {
+    if (!name) return '?';
+    const clean = String(name).replace(/^(นาย|นาง|นางสาว|ดร\.|น\.ส\.)/, '').trim();
+    return clean.charAt(0) || '?';
+  },
+
+  /** กันการฝัง HTML จากข้อมูล */
+  esc: function (s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  /** วันนี้เป็น YYYY-MM-DD */
+  today: function () {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+           '-' + String(d.getDate()).padStart(2, '0');
+  },
+
+  addDays: function (iso, n) {
+    const d = new Date(iso);
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+           '-' + String(d.getDate()).padStart(2, '0');
+  },
+
+  monthStart: function (iso) {
+    const d = iso ? new Date(iso) : new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+  }
+};
+
+/* --------------------------------------------------------- ป้ายสถานะ (badge) */
+const Labels = {
+  employment_status: {
+    ACTIVE: ['ปฏิบัติงาน', 'green'], PROBATION: ['ทดลองงาน', 'amber'],
+    ON_LEAVE: ['ลาพัก', 'blue'], SUSPENDED: ['พักราชการ', 'rose'],
+    TRANSFERRED_OUT: ['โอนย้ายออก', 'slate'], RESIGNED: ['ลาออก', 'slate'],
+    RETIRED: ['เกษียณ', 'slate'], TERMINATED: ['ให้ออก', 'rose'], DECEASED: ['เสียชีวิต', 'slate']
+  },
+  request_status: {
+    DRAFT: ['ร่าง', 'slate'], PENDING: ['รออนุมัติ', 'amber'],
+    APPROVED: ['อนุมัติแล้ว', 'green'], REJECTED: ['ไม่อนุมัติ', 'rose'],
+    RETURNED: ['ส่งกลับแก้ไข', 'amber'], CANCELLED: ['ยกเลิก', 'slate'],
+    COMPLETED: ['เสร็จสิ้น', 'green'], SUBMITTED: ['ยื่นแล้ว', 'blue'],
+    REVIEWING: ['กำลังพิจารณา', 'amber'], PARTIAL: ['อนุมัติบางส่วน', 'amber'],
+    PAID: ['จ่ายแล้ว', 'green'], ISSUED: ['ออกแล้ว', 'green'],
+    WITHDRAWN: ['ถอนเรื่อง', 'slate'], CALCULATED: ['คำนวณแล้ว', 'blue'],
+    HIRED: ['บรรจุแล้ว', 'green'], OPEN: ['เปิดรับ', 'green'],
+    CLOSED: ['ปิด', 'slate'], APPLIED: ['ดำเนินการแล้ว', 'green'],
+    PROPOSED: ['เสนอแล้ว', 'blue'], ACKNOWLEDGED: ['รับทราบแล้ว', 'green'],
+    APPEALED: ['อุทธรณ์', 'amber']
+  },
+  attendance: {
+    PRESENT: ['มาปฏิบัติงาน', 'green'], LATE: ['มาสาย', 'amber'],
+    ABSENT: ['ขาดงาน', 'rose'], LEAVE: ['ลา', 'blue'],
+    HOLIDAY: ['วันหยุด', 'slate'], DAY_OFF: ['วันหยุดประจำ', 'slate'],
+    HALF_DAY: ['ลาครึ่งวัน', 'blue'], MISSING_IN: ['ไม่ได้บันทึกเข้า', 'amber'],
+    MISSING_OUT: ['ไม่ได้บันทึกออก', 'amber'], TRIP: ['ไปราชการ', 'violet'],
+    TRAINING: ['อบรม', 'violet']
+  },
+  employment_type: {
+    CIVIL_SERVANT: 'ข้าราชการ', GOV_EMPLOYEE: 'พนักงานราชการ',
+    PERMANENT_EMP: 'ลูกจ้างประจำ', TEMPORARY: 'ลูกจ้างชั่วคราว',
+    CONTRACT: 'พนักงานจ้างเหมา', DAILY: 'ลูกจ้างรายวัน',
+    OUTSOURCE: 'จ้างเหมาบริการ', VOLUNTEER: 'อาสาสมัคร'
+  },
+  severity: {
+    CRITICAL: ['วิกฤต', 'rose'], HIGH: ['เร่งด่วน', 'amber'],
+    MEDIUM: ['ปานกลาง', 'blue'], LOW: ['ต่ำ', 'slate']
+  },
+  alert_type: {
+    LICENSE_EXPIRING: 'ใบประกอบวิชาชีพใกล้หมดอายุ',
+    PROBATION_DUE: 'ครบกำหนดทดลองงาน',
+    RETIREMENT_DUE: 'ใกล้เกษียณอายุ',
+    TRAINING_EXPIRING: 'ใบรับรองอบรมใกล้หมดอายุ',
+    HEALTH_CHECKUP_DUE: 'ยังไม่ตรวจสุขภาพประจำปี'
+  },
+
+  /** คืน HTML ของ badge */
+  badge: function (group, value) {
+    const map = this[group] || {};
+    const def = map[value];
+    if (!def) return '<span class="badge badge-slate">' + Fmt.esc(value || '—') + '</span>';
+    if (typeof def === 'string') return '<span class="badge badge-slate">' + Fmt.esc(def) + '</span>';
+    return '<span class="badge badge-' + def[1] + '">' + Fmt.esc(def[0]) + '</span>';
+  },
+
+  text: function (group, value) {
+    const def = (this[group] || {})[value];
+    if (!def) return value || '—';
+    return typeof def === 'string' ? def : def[0];
+  }
+};
+
+/* ------------------------------------------------------------------ Toast */
+const Toast = {
+  show: function (message, kind, title) {
+    const host = document.getElementById('toasts');
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.innerHTML = (title ? '<strong>' + Fmt.esc(title) + '</strong>' : '') +
+                   Fmt.esc(message);
+    host.appendChild(el);
+    setTimeout(function () {
+      el.style.transition = 'opacity .25s, transform .25s';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(6px)';
+      setTimeout(function () { el.remove(); }, 260);
+    }, kind === 'error' ? 6500 : 3800);
+  },
+  ok:    function (m, t) { this.show(m, '', t || 'สำเร็จ'); },
+  error: function (m, t) { this.show(m, 'error', t || 'ไม่สำเร็จ'); },
+  warn:  function (m, t) { this.show(m, 'warn', t || 'โปรดตรวจสอบ'); }
+};
+
+/* ------------------------------------------------------------------ Modal */
+const Modal = {
+  stack: [],
+
+  /**
+   * open({ title, body, size, buttons:[{label,kind,onClick,close}] })
+   * body เป็น HTML string หรือ HTMLElement
+   * onClick ที่คืน Promise จะปิด modal เมื่อ resolve เท่านั้น
+   */
+  open: function (opts) {
+    const host = document.getElementById('modalHost');
+    const scrim = document.createElement('div');
+    scrim.className = 'modal-scrim';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal' + (opts.size ? ' ' + opts.size : '');
+
+    const head = document.createElement('div');
+    head.className = 'modal-head';
+    head.innerHTML = '<h3>' + Fmt.esc(opts.title || '') + '</h3>';
+    const close = document.createElement('button');
+    close.className = 'icon-btn';
+    close.textContent = '✕';
+    close.onclick = function () { Modal.close(scrim); };
+    head.appendChild(close);
+
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    if (typeof opts.body === 'string') body.innerHTML = opts.body;
+    else if (opts.body) body.appendChild(opts.body);
+
+    modal.appendChild(head);
+    modal.appendChild(body);
+
+    if (opts.buttons && opts.buttons.length) {
+      const foot = document.createElement('div');
+      foot.className = 'modal-foot';
+      opts.buttons.forEach(function (b) {
+        const btn = document.createElement('button');
+        btn.className = 'btn ' + (b.kind || 'btn-secondary');
+        btn.textContent = b.label;
+        btn.onclick = function () {
+          if (!b.onClick) return Modal.close(scrim);
+          const out = b.onClick(body, btn);
+          if (out && typeof out.then === 'function') {
+            btn.disabled = true;
+            const original = btn.textContent;
+            btn.textContent = 'กำลังบันทึก…';
+            out.then(function () { Modal.close(scrim); })
+               .catch(function (e) {
+                 Toast.error(e.message);
+                 btn.disabled = false;
+                 btn.textContent = original;
+               });
+          } else if (b.close !== false) {
+            Modal.close(scrim);
+          }
+        };
+        foot.appendChild(btn);
+      });
+      modal.appendChild(foot);
+    }
+
+    scrim.appendChild(modal);
+    scrim.addEventListener('click', function (e) {
+      if (e.target === scrim && opts.dismissable !== false) Modal.close(scrim);
+    });
+    host.appendChild(scrim);
+    this.stack.push(scrim);
+
+    const first = body.querySelector('input,select,textarea');
+    if (first) setTimeout(function () { first.focus(); }, 60);
+
+    return { scrim: scrim, body: body };
+  },
+
+  close: function (scrim) {
+    const target = scrim || this.stack[this.stack.length - 1];
+    if (!target) return;
+    target.remove();
+    this.stack = this.stack.filter(function (s) { return s !== target; });
+  },
+
+  confirm: function (message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      Modal.open({
+        title: opts.title || 'ยืนยันการดำเนินการ',
+        size: 'narrow',
+        body: '<p style="margin:0;line-height:1.7">' + Fmt.esc(message) + '</p>',
+        buttons: [
+          { label: 'ยกเลิก', onClick: function () { resolve(false); } },
+          { label: opts.okLabel || 'ยืนยัน',
+            kind: opts.danger ? 'btn-danger' : 'btn-primary',
+            onClick: function () { resolve(true); } }
+        ]
+      });
+    });
+  },
+
+  /** กล่องกรอกเหตุผล (ใช้กับการไม่อนุมัติ/ยกเลิก) */
+  prompt: function (title, label, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      const id = 'p' + Date.now();
+      Modal.open({
+        title: title,
+        size: 'narrow',
+        body: '<div class="field-group"><label class="field-label">' + Fmt.esc(label) + '</label>' +
+              '<textarea class="field" id="' + id + '" placeholder="' +
+              Fmt.esc(opts.placeholder || '') + '"></textarea></div>',
+        buttons: [
+          { label: 'ยกเลิก', onClick: function () { resolve(null); } },
+          { label: opts.okLabel || 'ตกลง', kind: 'btn-primary',
+            onClick: function (body) {
+              const v = body.querySelector('#' + id).value.trim();
+              if (opts.required && !v) { Toast.warn('กรุณากรอก' + label); return false; }
+              resolve(v);
+            } }
+        ]
+      });
+    });
+  }
+};
+
+/* ------------------------------------------------------------------ Form */
+const Form = {
+  /**
+   * สร้าง HTML ของฟอร์มจากคำอธิบายฟิลด์
+   * fields: [{ key, label, type, options, required, hint, full, value, attrs }]
+   * type: text | number | date | time | datetime | select | textarea | checkbox | money
+   */
+  html: function (fields, values) {
+    values = values || {};
+    return '<div class="form-grid">' + fields.map(function (f) {
+      const v = values[f.key] === undefined || values[f.key] === null ? '' : values[f.key];
+      const req = f.required ? ' <span style="color:var(--rose-600)">*</span>' : '';
+      const attrs = 'id="f_' + f.key + '" name="' + f.key + '"' +
+                    (f.required ? ' required' : '') +
+                    (f.readonly ? ' disabled' : '') +
+                    (f.attrs ? ' ' + f.attrs : '');
+      let input;
+
+      if (f.type === 'select') {
+        input = '<select class="field" ' + attrs + '>' +
+          (f.placeholder !== false ? '<option value="">— เลือก —</option>' : '') +
+          (f.options || []).map(function (o) {
+            const val = o.value !== undefined ? o.value : o.id;
+            const lab = o.label !== undefined ? o.label : (o.name_th || o.name || val);
+            return '<option value="' + Fmt.esc(val) + '"' +
+                   (String(val) === String(v) ? ' selected' : '') + '>' +
+                   Fmt.esc(lab) + '</option>';
+          }).join('') + '</select>';
+      } else if (f.type === 'textarea') {
+        input = '<textarea class="field" ' + attrs + ' placeholder="' +
+                Fmt.esc(f.placeholder || '') + '">' + Fmt.esc(v) + '</textarea>';
+      } else if (f.type === 'checkbox') {
+        input = '<label class="row gap-2" style="padding:8px 0"><input type="checkbox" ' + attrs +
+                (v ? ' checked' : '') + '><span>' + Fmt.esc(f.checkboxLabel || f.label) + '</span></label>';
+        return '<div class="field-group' + (f.full ? ' full' : '') + '">' + input +
+               (f.hint ? '<div class="field-hint">' + Fmt.esc(f.hint) + '</div>' : '') + '</div>';
+      } else {
+        const inputType = f.type === 'money' ? 'number'
+                        : f.type === 'datetime' ? 'datetime-local'
+                        : (f.type || 'text');
+        input = '<input class="field" type="' + inputType + '" ' + attrs +
+                (f.type === 'money' ? ' step="0.01"' : '') +
+                ' value="' + Fmt.esc(v) + '" placeholder="' + Fmt.esc(f.placeholder || '') + '">';
+      }
+
+      return '<div class="field-group' + (f.full ? ' full' : '') + '">' +
+             '<label class="field-label" for="f_' + f.key + '">' + Fmt.esc(f.label) + req + '</label>' +
+             input +
+             (f.hint ? '<div class="field-hint">' + Fmt.esc(f.hint) + '</div>' : '') +
+             '</div>';
+    }).join('') + '</div>';
+  },
+
+  /** อ่านค่าจากฟอร์ม พร้อมตรวจฟิลด์ที่บังคับ */
+  read: function (container, fields) {
+    const out = {};
+    const missing = [];
+    fields.forEach(function (f) {
+      const el = container.querySelector('#f_' + f.key);
+      if (!el) return;
+      let v;
+      if (f.type === 'checkbox') v = el.checked;
+      else if (f.type === 'number' || f.type === 'money') {
+        v = el.value === '' ? null : Number(el.value);
+      } else {
+        v = el.value === '' ? null : el.value;
+      }
+      if (f.required && (v === null || v === '' || v === false && f.type !== 'checkbox')) {
+        missing.push(f.label);
+      }
+      out[f.key] = v;
+    });
+    if (missing.length) throw new Error('กรุณากรอก: ' + missing.join(', '));
+    return out;
+  }
+};
+
+/* ------------------------------------------------------------------ Render */
+const UI = {
+  loading: function (rows) {
+    let html = '<div class="loading">';
+    for (let i = 0; i < (rows || 4); i++) {
+      html += '<div class="skeleton" style="width:' + (100 - i * 8) + '%"></div>';
+    }
+    return html + '</div>';
+  },
+
+  empty: function (message, actionHtml) {
+    return '<div class="table-empty">' + Fmt.esc(message || 'ไม่พบข้อมูล') +
+           (actionHtml ? '<div class="mt-2">' + actionHtml + '</div>' : '') + '</div>';
+  },
+
+  card: function (title, bodyHtml, opts) {
+    opts = opts || {};
+    return '<section class="card' + (opts.className ? ' ' + opts.className : '') + '">' +
+      (title ? '<div class="card-head"><div class="grow"><h2>' + Fmt.esc(title) + '</h2>' +
+        (opts.sub ? '<div class="sub">' + Fmt.esc(opts.sub) + '</div>' : '') + '</div>' +
+        (opts.actions || '') + '</div>' : '') +
+      '<div class="card-body' + (opts.tight ? ' tight' : '') + '">' + bodyHtml + '</div></section>';
+  },
+
+  stat: function (label, value, sub, kind) {
+    return '<div class="stat' + (kind ? ' ' + kind : '') + '">' +
+      '<div class="stat-label">' + Fmt.esc(label) + '</div>' +
+      '<div class="stat-value">' + value + '</div>' +
+      (sub ? '<div class="stat-sub">' + Fmt.esc(sub) + '</div>' : '') + '</div>';
+  },
+
+  /**
+   * ตาราง: columns = [{ key, label, render(row), className, width }]
+   */
+  table: function (columns, rows, opts) {
+    opts = opts || {};
+    if (!rows || !rows.length) return this.empty(opts.emptyMessage, opts.emptyAction);
+
+    const head = columns.map(function (c) {
+      return '<th class="' + (c.className || '') + '"' +
+             (c.width ? ' style="width:' + c.width + '"' : '') + '>' +
+             Fmt.esc(c.label) + '</th>';
+    }).join('');
+
+    const body = rows.map(function (r, i) {
+      const cells = columns.map(function (c) {
+        const content = c.render ? c.render(r, i) : Fmt.esc(r[c.key]);
+        return '<td class="' + (c.className || '') + '">' +
+               (content === null || content === undefined ? '—' : content) + '</td>';
+      }).join('');
+      return '<tr' + (opts.rowAttrs ? ' ' + opts.rowAttrs(r, i) : '') + '>' + cells + '</tr>';
+    }).join('');
+
+    return '<div class="table-wrap"><table><thead><tr>' + head + '</tr></thead>' +
+           '<tbody>' + body + '</tbody></table></div>';
+  },
+
+  avatar: function (name, url, size) {
+    const cls = 'avatar' + (size === 'lg' ? ' lg' : '');
+    if (url) return '<img class="' + cls + '" src="' + Fmt.esc(url) + '" alt="">';
+    return '<span class="' + cls + '">' + Fmt.esc(Fmt.initials(name)) + '</span>';
+  },
+
+  /** แถบกราฟแท่งอย่างง่าย */
+  bars: function (items, opts) {
+    opts = opts || {};
+    const max = Math.max.apply(null, items.map(function (i) { return Number(i.value) || 0; }).concat([1]));
+    return '<div class="bars">' + items.map(function (i) {
+      const h = Math.round((Number(i.value) || 0) / max * 100);
+      return '<div class="bar" title="' + Fmt.esc(i.label + ': ' + i.value) + '">' +
+        (opts.showValue !== false ? '<span class="bar-value">' + Fmt.num(i.value) + '</span>' : '') +
+        '<div class="bar-fill" style="height:' + h + '%"></div>' +
+        '<span class="bar-label">' + Fmt.esc(i.label) + '</span></div>';
+    }).join('') + '</div>';
+  },
+
+  meter: function (value, total, kind) {
+    const pct = total > 0 ? Math.min(100, Math.round(value / total * 100)) : 0;
+    return '<div class="meter' + (kind ? ' ' + kind : '') + '"><span style="width:' + pct + '%"></span></div>';
+  },
+
+  /** แถบเครื่องมือค้นหา/กรอง */
+  toolbar: function (parts) {
+    return '<div class="toolbar">' + parts.filter(Boolean).join('') + '</div>';
+  },
+
+  tabs: function (items, activeId, onClickName) {
+    return '<div class="tabs">' + items.map(function (t) {
+      return '<button class="tab' + (t.id === activeId ? ' active' : '') +
+             '" onclick="' + onClickName + '(\'' + t.id + '\')">' +
+             Fmt.esc(t.label) + '</button>';
+    }).join('') + '</div>';
+  },
+
+  /** แถวข้อมูลแบบ label/value สำหรับหน้ารายละเอียด */
+  defList: function (pairs) {
+    return '<div class="grid grid-3">' + pairs.filter(Boolean).map(function (p) {
+      return '<div><div class="field-label">' + Fmt.esc(p[0]) + '</div>' +
+             '<div>' + (p[1] === null || p[1] === undefined || p[1] === '' ? '—' : p[1]) + '</div></div>';
+    }).join('') + '</div>';
+  },
+
+  pager: function (total, offset, limit, onPageName) {
+    if (total <= limit) return '';
+    const page = Math.floor(offset / limit) + 1;
+    const pages = Math.ceil(total / limit);
+    return '<div class="pager">' +
+      '<span>แสดง ' + (offset + 1) + '–' + Math.min(offset + limit, total) +
+      ' จาก ' + Fmt.num(total) + ' รายการ</span>' +
+      '<button class="btn btn-ghost btn-sm" ' + (page <= 1 ? 'disabled' : '') +
+      ' onclick="' + onPageName + '(' + (offset - limit) + ')">ก่อนหน้า</button>' +
+      '<span>หน้า ' + page + '/' + pages + '</span>' +
+      '<button class="btn btn-ghost btn-sm" ' + (page >= pages ? 'disabled' : '') +
+      ' onclick="' + onPageName + '(' + (offset + limit) + ')">ถัดไป</button></div>';
+  },
+
+  /** ดาวน์โหลดไฟล์ที่สร้างฝั่ง client */
+  download: function (filename, content, mime) {
+    const blob = new Blob([content], { type: (mime || 'text/csv') + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 500);
+  }
+};
+</script>

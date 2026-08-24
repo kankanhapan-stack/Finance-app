@@ -1,0 +1,1241 @@
+<script>
+/* =============================================================================
+   HRM :: ViewsWork.html
+   โมดูล 05 Time, 06 Leave, 07 Payroll, 08 Benefits
+   ============================================================================= */
+
+VIEWS.time = {
+  tab: 'me',
+
+  render: function (host) {
+    this.host = host;
+    if (!Store.can('time.read')) this.tab = 'me';
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'me', label: 'ลงเวลาของฉัน' }];
+    if (Store.can('time.read')) {
+      tabs.push({ id: 'daily', label: 'สรุปรายวัน' });
+      tabs.push({ id: 'monthly', label: 'สรุปรายเดือน' });
+      tabs.push({ id: 'adjust', label: 'คำขอแก้ไขเวลา' });
+      tabs.push({ id: 'ot', label: 'ล่วงเวลา' });
+    }
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.time.setTab') +
+                          '<div id="timePane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('timePane');
+    const self = this;
+
+    if (this.tab === 'me') {
+      return api('time.myToday', {}).then(function (d) {
+        const a = d.attendance || {};
+        const logs = d.logs || [];
+        const hasIn = logs.some(function (l) { return l.direction === 'IN'; });
+        const hasOut = logs.some(function (l) { return l.direction === 'OUT'; });
+        const shift = (d.schedule || {}).work_shifts;
+
+        pane.innerHTML =
+          '<div class="grid grid-2">' +
+          UI.card('บันทึกเวลาวันนี้',
+            '<div class="col gap-3">' +
+            '<div><div class="field-label">วันที่</div>' +
+            '<div style="font-size:17px;font-weight:600">' + Fmt.date(d.date) + '</div>' +
+            (shift ? '<div class="small muted">กะ ' + Fmt.esc(shift.name_th) + '</div>' : '') +
+            '</div>' +
+            '<div class="row gap-3 wrap">' +
+            '<div><div class="field-label">เวลาเข้า</div>' +
+            '<div style="font-size:24px;font-weight:700;font-family:Prompt">' +
+            (a.first_in ? Fmt.time(a.first_in) : '—:—') + '</div></div>' +
+            '<div><div class="field-label">เวลาออก</div>' +
+            '<div style="font-size:24px;font-weight:700;font-family:Prompt">' +
+            (a.last_out ? Fmt.time(a.last_out) : '—:—') + '</div></div>' +
+            '<div><div class="field-label">สถานะ</div>' +
+            '<div class="mt-1">' + Labels.badge('attendance', a.status || 'ABSENT') + '</div></div>' +
+            '</div>' +
+            (a.late_minutes ? '<div class="small" style="color:var(--gold-500)">' +
+              'มาสาย ' + Fmt.minutes(a.late_minutes) + '</div>' : '') +
+            '<div class="row gap-2">' +
+            '<button class="btn btn-primary" onclick="VIEWS.time.punch(\'IN\')"' +
+              (hasIn ? ' disabled' : '') + '>บันทึกเวลาเข้า</button>' +
+            '<button class="btn btn-secondary" onclick="VIEWS.time.punch(\'OUT\')"' +
+              (!hasIn ? ' disabled' : '') + '>บันทึกเวลาออก</button>' +
+            '</div>' +
+            '<div class="small muted">ระบบจะบันทึกพิกัดเพื่อยืนยันว่าอยู่ในพื้นที่สถานบริการ</div>' +
+            '</div>') +
+          UI.card('รายการบันทึกวันนี้',
+            UI.table([
+              { label: 'เวลา', render: function (l) { return Fmt.time(l.log_time); } },
+              { label: 'ประเภท', render: function (l) {
+                  return l.direction === 'IN' ? '<span class="badge badge-green">เข้า</span>'
+                                              : '<span class="badge badge-blue">ออก</span>'; } },
+              { label: 'ช่องทาง', key: 'method' },
+              { label: 'พิกัด', render: function (l) {
+                  if (l.distance_m === null || l.distance_m === undefined) return '—';
+                  return l.is_outside_geo
+                    ? '<span style="color:var(--rose-600)">นอกพื้นที่ ' +
+                      Fmt.num(l.distance_m) + ' ม.</span>'
+                    : '<span style="color:var(--moss-600)">ในพื้นที่</span>'; } }
+            ], logs, { emptyMessage: 'ยังไม่มีการบันทึกเวลาวันนี้' }), { tight: true }) +
+          '</div>' +
+          '<div class="mt-2"><button class="btn btn-ghost btn-sm" ' +
+          'onclick="VIEWS.time.requestAdjust()">แจ้งขอแก้ไขเวลา (กรณีลืมบันทึก)</button></div>';
+      });
+    }
+
+    if (this.tab === 'daily') {
+      const from = this.from || Fmt.addDays(Fmt.today(), -6);
+      const to = this.to || Fmt.today();
+      return apiSafe('time.attendanceList', { from: from, to: to, limit: 500 }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.toolbar([
+            '<input class="field" type="date" id="tFrom" value="' + from + '">',
+            '<span class="muted">ถึง</span>',
+            '<input class="field" type="date" id="tTo" value="' + to + '">',
+            '<button class="btn btn-secondary btn-sm" onclick="VIEWS.time.applyRange()">ดูข้อมูล</button>',
+            '<div class="grow"></div>',
+            Store.can('time.write')
+              ? '<button class="btn btn-ghost btn-sm" onclick="VIEWS.time.recalc()">คำนวณใหม่</button>'
+              : ''
+          ]) +
+          UI.card(null, UI.table([
+            { label: 'วันที่', render: function (r) { return Fmt.date(r.work_date, true); } },
+            { label: 'บุคลากร', render: function (r) {
+                const e = r.employees || {};
+                return employeeLink(r.employee_id,
+                  [e.first_name_th, e.last_name_th].filter(Boolean).join(' '), e.emp_code); } },
+            { label: 'เข้า', render: function (r) { return Fmt.time(r.first_in); } },
+            { label: 'ออก', render: function (r) { return Fmt.time(r.last_out); } },
+            { label: 'สาย', className: 'num', render: function (r) {
+                return r.late_minutes ? '<span style="color:var(--gold-500)">' +
+                  r.late_minutes + ' น.</span>' : '—'; } },
+            { label: 'ล่วงเวลา', className: 'num', render: function (r) {
+                return r.ot_minutes ? Fmt.minutes(r.ot_minutes) : '—'; } },
+            { label: 'ชั่วโมงงาน', className: 'num', render: function (r) {
+                return (Number(r.work_minutes || 0) / 60).toFixed(1); } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('attendance', r.status); } }
+          ], rows, { emptyMessage: 'ไม่พบข้อมูลในช่วงวันที่เลือก' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'monthly') {
+      const month = this.month || Fmt.monthStart();
+      return apiSafe('time.monthlySummary', { monthStart: month }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.toolbar([
+            '<input class="field" type="month" id="tMonth" value="' + month.slice(0, 7) + '" ' +
+              'onchange="VIEWS.time.applyMonth()">',
+            '<div class="grow"></div>',
+            Store.can('report.export')
+              ? '<button class="btn btn-ghost btn-sm" onclick="VIEWS.time.exportMonthly()">' +
+                'ส่งออก CSV</button>' : ''
+          ]) +
+          UI.card('สรุปการมาปฏิบัติงาน ' + Fmt.month(month), UI.table([
+            { label: 'รหัส', key: 'emp_code', width: '90px' },
+            { label: 'ชื่อ-สกุล', render: function (r) {
+                return employeeLink(r.employee_id, r.full_name_th); } },
+            { label: 'สังกัด', key: 'department_name' },
+            { label: 'มาปฏิบัติงาน', className: 'num', key: 'present_days' },
+            { label: 'สาย (ครั้ง)', className: 'num', render: function (r) {
+                return r.late_days ? '<span style="color:var(--gold-500)">' + r.late_days + '</span>' : '0'; } },
+            { label: 'สาย (นาที)', className: 'num', key: 'late_minutes' },
+            { label: 'ขาด', className: 'num', render: function (r) {
+                return r.absent_days ? '<span style="color:var(--rose-600)">' + r.absent_days + '</span>' : '0'; } },
+            { label: 'ลา', className: 'num', key: 'leave_days' },
+            { label: 'ล่วงเวลา', className: 'num', render: function (r) {
+                return Fmt.minutes(r.ot_minutes); } },
+            { label: 'ชั่วโมงงาน', className: 'num', key: 'work_hours' }
+          ], rows, { emptyMessage: 'ไม่มีข้อมูลของเดือนนี้' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'adjust') {
+      return apiSafe('time.adjustmentList', { status: 'PENDING' }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.card('คำขอแก้ไขเวลารออนุมัติ', UI.table([
+            { label: 'บุคลากร', render: function (r) {
+                const e = r.employees || {};
+                return employeeLink(r.employee_id,
+                  [e.first_name_th, e.last_name_th].filter(Boolean).join(' '), e.emp_code); } },
+            { label: 'วันที่', render: function (r) { return Fmt.date(r.work_date, true); } },
+            { label: 'ประเภท', key: 'adjust_type' },
+            { label: 'เวลาที่ขอ', render: function (r) { return Fmt.time(r.requested_time); } },
+            { label: 'เหตุผล', key: 'reason' },
+            { label: '', className: 'right', render: function (r) {
+                return Store.can('time.approve')
+                  ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.time.actAdjust(\'' +
+                    r.id + '\',\'APPROVED\')">อนุมัติ</button> ' +
+                    '<button class="btn btn-danger-soft btn-sm" onclick="VIEWS.time.actAdjust(\'' +
+                    r.id + '\',\'REJECTED\')">ไม่อนุมัติ</button>' : ''; } }
+          ], rows, { emptyMessage: 'ไม่มีคำขอค้างพิจารณา' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'ot') {
+      return apiSafe('time.otList', { limit: 100 }, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('คำขอทำงานล่วงเวลา', UI.table([
+          { label: 'เลขที่', key: 'request_no', width: '110px' },
+          { label: 'บุคลากร', render: function (r) {
+              const e = r.employees || {};
+              return employeeLink(r.employee_id,
+                [e.first_name_th, e.last_name_th].filter(Boolean).join(' '), e.emp_code); } },
+          { label: 'วันที่', render: function (r) { return Fmt.date(r.work_date, true); } },
+          { label: 'ช่วงเวลา', render: function (r) {
+              return Fmt.time(r.start_time) + ' – ' + Fmt.time(r.end_time); } },
+          { label: 'นาที', className: 'num', key: 'planned_minutes' },
+          { label: 'เหตุผล', key: 'reason' },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              return (Store.can('time.approve') && r.status === 'PENDING')
+                ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.time.actOt(\'' +
+                  r.id + '\',\'APPROVED\')">อนุมัติ</button>' : ''; } }
+        ], rows, { emptyMessage: 'ไม่มีคำขอล่วงเวลา' }),
+        { tight: true,
+          actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.time.requestOt()">' +
+                   '+ ขอทำล่วงเวลา</button>' });
+      });
+    }
+  },
+
+  punch: function (direction) {
+    const send = function (coords) {
+      const payload = { direction: direction, method: 'WEB' };
+      if (coords) {
+        payload.lat = coords.latitude;
+        payload.lng = coords.longitude;
+        payload.accuracy = coords.accuracy;
+      }
+      apiSafe('time.punch', payload).then(function (out) {
+        if (!out) return;
+        Toast.ok('บันทึกเวลา' + (direction === 'IN' ? 'เข้า' : 'ออก') + 'เรียบร้อย');
+        if (out.log && out.log.is_outside_geo) {
+          Toast.warn('บันทึกจากนอกพื้นที่สถานบริการ (ห่าง ' +
+                     Fmt.num(out.log.distance_m) + ' เมตร) — อาจต้องชี้แจงเพิ่มเติม');
+        }
+        VIEWS.time.paintPane();
+      });
+    };
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        function (pos) { send(pos.coords); },
+        function () {
+          Toast.warn('ไม่สามารถอ่านพิกัดได้ — บันทึกเวลาโดยไม่มีพิกัด');
+          send(null);
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+    } else {
+      send(null);
+    }
+  },
+
+  applyRange: function () {
+    this.from = document.getElementById('tFrom').value;
+    this.to = document.getElementById('tTo').value;
+    if (this.from > this.to) return Toast.warn('ช่วงวันที่ไม่ถูกต้อง');
+    this.paintPane();
+  },
+
+  applyMonth: function () {
+    this.month = document.getElementById('tMonth').value + '-01';
+    this.paintPane();
+  },
+
+  exportMonthly: function () {
+    apiSafe('report.exportCsv', {
+      code: 'ATTENDANCE_MONTHLY',
+      params: { monthStart: this.month || Fmt.monthStart() }
+    }).then(function (out) {
+      if (!out) return;
+      UI.download(out.filename, out.csv);
+      Toast.ok('ส่งออกแล้ว');
+    });
+  },
+
+  recalc: function () {
+    const from = this.from || Fmt.addDays(Fmt.today(), -6);
+    const to = this.to || Fmt.today();
+    Modal.confirm('คำนวณสรุปเวลาใหม่สำหรับ ' + Fmt.date(from, true) + ' ถึง ' +
+                  Fmt.date(to, true) + ' ใช่หรือไม่').then(function (yes) {
+      if (!yes) return;
+      apiSafe('time.recalc', { from: from, to: to }).then(function (out) {
+        if (!out) return;
+        Toast.ok('คำนวณใหม่ ' + Fmt.num(out.recalculated) + ' รายการแล้ว');
+        VIEWS.time.paintPane();
+      });
+    });
+  },
+
+  requestAdjust: function () {
+    const fields = [
+      { key: 'work_date', label: 'วันที่ต้องการแก้ไข', type: 'date', required: true },
+      { key: 'adjust_type', label: 'ประเภท', type: 'select', required: true, options: [
+          { value: 'ADD_IN', label: 'เพิ่มเวลาเข้า (ลืมบันทึก)' },
+          { value: 'ADD_OUT', label: 'เพิ่มเวลาออก (ลืมบันทึก)' },
+          { value: 'EDIT_IN', label: 'แก้ไขเวลาเข้า' },
+          { value: 'EDIT_OUT', label: 'แก้ไขเวลาออก' },
+          { value: 'EXCUSE_LATE', label: 'ขอผ่อนผันการมาสาย' }] },
+      { key: 'requested_time', label: 'เวลาที่ถูกต้อง', type: 'datetime' },
+      { key: 'reason', label: 'เหตุผล', type: 'textarea', required: true, full: true }
+    ];
+    Modal.open({
+      title: 'ขอแก้ไขเวลาปฏิบัติงาน',
+      body: Form.html(fields, { work_date: Fmt.today() }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'ส่งคำขอ', kind: 'btn-primary', onClick: function (body) {
+            return api('time.adjustmentSave', Form.read(body, fields)).then(function () {
+              Toast.ok('ส่งคำขอแล้ว รอผู้บังคับบัญชาพิจารณา');
+              VIEWS.time.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  actAdjust: function (id, action) {
+    const doIt = function (note) {
+      apiSafe('time.adjustmentAct', { id: id, action: action, note: note }).then(function (out) {
+        if (!out) return;
+        Toast.ok(action === 'APPROVED' ? 'อนุมัติแล้ว' : 'บันทึกการไม่อนุมัติแล้ว');
+        VIEWS.time.paintPane();
+      });
+    };
+    if (action === 'REJECTED') {
+      Modal.prompt('ไม่อนุมัติคำขอแก้ไขเวลา', 'เหตุผล', { required: true })
+        .then(function (note) { if (note) doIt(note); });
+    } else {
+      doIt(null);
+    }
+  },
+
+  requestOt: function () {
+    const fields = [
+      { key: 'work_date', label: 'วันที่', type: 'date', required: true },
+      { key: 'start_time', label: 'เริ่มเวลา', type: 'datetime', required: true },
+      { key: 'end_time', label: 'ถึงเวลา', type: 'datetime', required: true },
+      { key: 'ot_rate', label: 'อัตรา (เท่า)', type: 'number', attrs: 'step="0.5"' },
+      { key: 'reason', label: 'เหตุผลความจำเป็น', type: 'textarea', required: true, full: true }
+    ];
+    Modal.open({
+      title: 'ขอทำงานล่วงเวลา',
+      body: Form.html(fields, { work_date: Fmt.today(), ot_rate: 1.5 }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'ส่งคำขอ', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            data.submit = true;
+            return api('time.otSave', data).then(function () {
+              Toast.ok('ส่งคำขอล่วงเวลาแล้ว');
+              VIEWS.time.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  actOt: function (id, action) {
+    apiSafe('time.otAct', { id: id, action: action }).then(function (out) {
+      if (!out) return;
+      Toast.ok('บันทึกแล้ว');
+      VIEWS.time.paintPane();
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.leave = {
+  tab: 'me',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'me', label: 'การลาของฉัน' }];
+    if (Store.can('leave.approve')) tabs.push({ id: 'approve', label: 'รออนุมัติ' });
+    if (Store.can('leave.read')) {
+      tabs.push({ id: 'all', label: 'ใบลาทั้งหมด' });
+      tabs.push({ id: 'calendar', label: 'ปฏิทินการลา' });
+    }
+    if (Store.can('leave.manage')) tabs.push({ id: 'setting', label: 'ตั้งค่า' });
+
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.leave.setTab') +
+                          '<div id="leavePane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('leavePane');
+    const self = this;
+
+    if (this.tab === 'me') {
+      return Promise.all([
+        apiSafe('leave.balance', {}, { fallback: [] }),
+        apiSafe('leave.list', { mine: true, limit: 30 }, { fallback: { rows: [], total: 0 } })
+      ]).then(function (r) {
+        const balance = r[0] || [];
+        const list = (r[1] || {}).rows || [];
+
+        pane.innerHTML =
+          '<div class="grid grid-4 mb-2">' + balance.slice(0, 4).map(function (b) {
+            const used = Number(b.used_days) + Number(b.pending_days);
+            return '<div class="stat">' +
+              '<div class="stat-label">' + Fmt.esc(b.leave_type_name) + '</div>' +
+              '<div class="stat-value">' + Fmt.money(b.remaining_days, 1) + '</div>' +
+              '<div class="stat-sub">คงเหลือจาก ' + Fmt.money(b.total_days, 0) + ' วัน</div>' +
+              '<div class="mt-1">' + UI.meter(used, b.total_days,
+                used / (b.total_days || 1) > 0.8 ? 'rose' : '') + '</div></div>';
+          }).join('') + '</div>' +
+          UI.card('ใบลาของฉัน', UI.table([
+            { label: 'เลขที่', key: 'request_no', width: '110px' },
+            { label: 'ประเภท', render: function (r) {
+                const t = r.leave_types || {};
+                return '<span class="badge" style="background:' +
+                  Fmt.esc(t.color || '#eceae1') + '22;color:' + Fmt.esc(t.color || '#4c5c51') + '">' +
+                  Fmt.esc(t.name_th || '—') + '</span>'; } },
+            { label: 'ช่วงวันที่', render: function (r) {
+                return Fmt.date(r.start_date, true) +
+                  (r.start_date !== r.end_date ? ' – ' + Fmt.date(r.end_date, true) : '') +
+                  (r.half_day ? ' (' + (r.half_day === 'AM' ? 'ครึ่งเช้า' : 'ครึ่งบ่าย') + ')' : ''); } },
+            { label: 'จำนวน', className: 'num', render: function (r) {
+                return Fmt.money(r.total_days, 1) + ' วัน'; } },
+            { label: 'เหตุผล', key: 'reason' },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } },
+            { label: '', className: 'right', render: function (r) {
+                let b = '';
+                if (['DRAFT', 'RETURNED'].indexOf(r.status) >= 0) {
+                  b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.leave.submit(\'' +
+                       r.id + '\')">ส่งอนุมัติ</button> ';
+                }
+                if (['DRAFT', 'PENDING', 'APPROVED'].indexOf(r.status) >= 0) {
+                  b += '<button class="btn btn-ghost btn-sm" onclick="VIEWS.leave.cancel(\'' +
+                       r.id + '\')">ยกเลิก</button>';
+                }
+                return b; } }
+          ], list, { emptyMessage: 'ยังไม่มีใบลา' }),
+          { tight: true,
+            actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.leave.create()">' +
+                     '+ ขอลา</button>' });
+      });
+    }
+
+    if (this.tab === 'approve') {
+      return apiSafe('leave.list', { pendingForMe: true, limit: 100 },
+                     { fallback: { rows: [] } }).then(function (res) {
+        const rows = res.rows || [];
+        Shell.setBadge('leave', rows.length);
+        pane.innerHTML = UI.card('ใบลารออนุมัติ', UI.table([
+          { label: 'ผู้ขอลา', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'ประเภท', render: function (r) {
+              return Fmt.esc((r.leave_types || {}).name_th || '—'); } },
+          { label: 'ช่วงวันที่', render: function (r) {
+              return Fmt.date(r.start_date, true) + ' – ' + Fmt.date(r.end_date, true); } },
+          { label: 'จำนวน', className: 'num', render: function (r) {
+              return Fmt.money(r.total_days, 1) + ' วัน'; } },
+          { label: 'เหตุผล', key: 'reason' },
+          { label: 'ยื่นเมื่อ', render: function (r) { return Fmt.ago(r.submitted_at); } },
+          { label: '', className: 'right', render: function (r) {
+              return '<button class="btn btn-primary btn-sm" onclick="VIEWS.leave.act(\'' +
+                r.id + '\',\'APPROVE\')">อนุมัติ</button> ' +
+                '<button class="btn btn-ghost btn-sm" onclick="VIEWS.leave.act(\'' +
+                r.id + '\',\'RETURN\')">ส่งกลับ</button> ' +
+                '<button class="btn btn-danger-soft btn-sm" onclick="VIEWS.leave.act(\'' +
+                r.id + '\',\'REJECT\')">ไม่อนุมัติ</button>'; } }
+        ], rows, { emptyMessage: 'ไม่มีใบลารอพิจารณา' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'all') {
+      return apiSafe('leave.list', { limit: 100 }, { fallback: { rows: [], total: 0 } })
+        .then(function (res) {
+          pane.innerHTML = UI.card('ใบลาทั้งหมด', UI.table([
+            { label: 'เลขที่', key: 'request_no', width: '110px' },
+            { label: 'ผู้ขอลา', render: function (r) {
+                return employeeLink(r.employee_id, empName(r.employees),
+                                    (r.employees || {}).emp_code); } },
+            { label: 'ประเภท', render: function (r) {
+                return Fmt.esc((r.leave_types || {}).name_th || '—'); } },
+            { label: 'ช่วงวันที่', render: function (r) {
+                return Fmt.date(r.start_date, true) + ' – ' + Fmt.date(r.end_date, true); } },
+            { label: 'วัน', className: 'num', render: function (r) {
+                return Fmt.money(r.total_days, 1); } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } }
+          ], res.rows, { emptyMessage: 'ไม่พบใบลา' }),
+          { tight: true,
+            actions: Store.can('report.export')
+              ? '<button class="btn btn-ghost btn-sm" onclick="VIEWS.leave.exportSummary()">' +
+                'ส่งออกสรุปการลา</button>' : '' });
+        });
+    }
+
+    if (this.tab === 'calendar') {
+      const from = this.calFrom || Fmt.monthStart();
+      const to = this.calTo || Fmt.addDays(Fmt.monthStart(), 40);
+      return apiSafe('leave.calendar', { from: from, to: to }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.toolbar([
+            '<input class="field" type="date" id="calFrom" value="' + from + '">',
+            '<span class="muted">ถึง</span>',
+            '<input class="field" type="date" id="calTo" value="' + to + '">',
+            '<button class="btn btn-secondary btn-sm" onclick="VIEWS.leave.applyCal()">ดู</button>'
+          ]) +
+          UI.card('ปฏิทินการลา', UI.table([
+            { label: 'ผู้ลา', render: function (r) {
+                return employeeLink(r.employee_id, empName(r.employees),
+                                    (r.employees || {}).emp_code); } },
+            { label: 'ประเภท', render: function (r) {
+                return Fmt.esc((r.leave_types || {}).name_th || '—'); } },
+            { label: 'ตั้งแต่', render: function (r) { return Fmt.date(r.start_date, true); } },
+            { label: 'ถึง', render: function (r) { return Fmt.date(r.end_date, true); } },
+            { label: 'วัน', className: 'num', render: function (r) {
+                return Fmt.money(r.total_days, 1); } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } }
+          ], rows, { emptyMessage: 'ไม่มีการลาในช่วงนี้' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'setting') {
+      return apiSafe('leave.typeList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ประเภทการลา', UI.table([
+          { label: 'รหัส', key: 'code', width: '110px' },
+          { label: 'ชื่อ', key: 'name_th' },
+          { label: 'สิทธิ/ปี', className: 'num', render: function (r) {
+              return r.default_quota === null ? 'ไม่จำกัด' : Fmt.money(r.default_quota, 0) + ' วัน'; } },
+          { label: 'สะสมได้', render: function (r) {
+              return r.allow_carry_over
+                ? '<span class="badge badge-green">ได้ ไม่เกิน ' +
+                  Fmt.money(r.carry_over_max, 0) + ' วัน</span>'
+                : '<span class="badge badge-slate">ไม่ได้</span>'; } },
+          { label: 'ต้องแนบเอกสาร', render: function (r) {
+              return r.require_attachment ? 'ใช่' : 'ไม่'; } },
+          { label: 'หักเงินเดือน', render: function (r) {
+              return Number(r.deduct_salary_rate) > 0
+                ? '<span class="badge badge-rose">หัก</span>' : '—'; } },
+          { label: '', className: 'right', render: function (r) {
+              return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.leave.editType(\'' +
+                     r.id + '\')">แก้ไข</button>'; } }
+        ], rows, { emptyMessage: 'ยังไม่ได้ตั้งค่าประเภทการลา' }),
+        { tight: true,
+          actions: '<button class="btn btn-secondary btn-sm" onclick="VIEWS.leave.generate()">' +
+                   'ตั้งสิทธิวันลาประจำปี</button>' });
+        VIEWS.leave.types = rows;
+      });
+    }
+  },
+
+  create: function () {
+    Store.options().then(function (o) {
+      const types = o.leaveTypes || [];
+      const fields = [
+        { key: 'leave_type_id', label: 'ประเภทการลา', type: 'select', required: true,
+          options: types.map(function (t) { return { value: t.id, label: t.name_th }; }) },
+        { key: 'start_date', label: 'ตั้งแต่วันที่', type: 'date', required: true },
+        { key: 'end_date', label: 'ถึงวันที่', type: 'date', required: true },
+        { key: 'half_day', label: 'ลาครึ่งวัน', type: 'select', options: [
+            { value: 'AM', label: 'ครึ่งวันเช้า' }, { value: 'PM', label: 'ครึ่งวันบ่าย' }],
+          hint: 'เลือกเฉพาะกรณีลาวันเดียว' },
+        { key: 'contact_phone', label: 'เบอร์ติดต่อระหว่างลา' },
+        { key: 'contact_address', label: 'ที่อยู่ระหว่างลา', full: true },
+        { key: 'reason', label: 'เหตุผลการลา', type: 'textarea', required: true, full: true }
+      ];
+
+      Modal.open({
+        title: 'ยื่นใบลา',
+        size: 'wide',
+        body: Form.html(fields, { start_date: Fmt.today(), end_date: Fmt.today() }) +
+              '<div id="leaveBalanceHint" class="small muted"></div>',
+        buttons: [
+          { label: 'บันทึกร่าง', onClick: function (body) {
+              return api('leave.save', Form.read(body, fields)).then(function () {
+                Toast.ok('บันทึกร่างใบลาแล้ว');
+                VIEWS.leave.paintPane();
+              });
+            } },
+          { label: 'ส่งอนุมัติ', kind: 'btn-primary', onClick: function (body) {
+              const data = Form.read(body, fields);
+              data.submit = true;
+              return api('leave.save', data).then(function (out) {
+                Toast.ok('ส่งใบลาเลขที่ ' + (out.request_no || '') + ' เรียบร้อย');
+                VIEWS.leave.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  submit: function (id) {
+    apiSafe('leave.submit', { id: id }).then(function (out) {
+      if (!out) return;
+      Toast.ok('ส่งใบลาเลขที่ ' + (out.request_no || '') + ' แล้ว');
+      VIEWS.leave.paintPane();
+    });
+  },
+
+  cancel: function (id) {
+    Modal.prompt('ยกเลิกใบลา', 'เหตุผลการยกเลิก').then(function (reason) {
+      if (reason === null) return;
+      apiSafe('leave.cancel', { id: id, reason: reason }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ยกเลิกใบลาแล้ว');
+        VIEWS.leave.paintPane();
+      });
+    });
+  },
+
+  act: function (id, action) {
+    const labels = { APPROVE: 'อนุมัติ', REJECT: 'ไม่อนุมัติ', RETURN: 'ส่งกลับให้แก้ไข' };
+    const run = function (comment) {
+      apiSafe('leave.act', { id: id, action: action, comment: comment }).then(function (out) {
+        if (!out) return;
+        Toast.ok(labels[action] + 'เรียบร้อย' +
+                 (out.status === 'PENDING' ? ' (รอผู้อนุมัติขั้นถัดไป)' : ''));
+        VIEWS.leave.paintPane();
+      });
+    };
+    if (action === 'APPROVE') {
+      Modal.confirm('ยืนยันการอนุมัติใบลานี้').then(function (yes) { if (yes) run(null); });
+    } else {
+      Modal.prompt(labels[action], 'เหตุผล', { required: true })
+        .then(function (c) { if (c) run(c); });
+    }
+  },
+
+  applyCal: function () {
+    this.calFrom = document.getElementById('calFrom').value;
+    this.calTo = document.getElementById('calTo').value;
+    this.paintPane();
+  },
+
+  exportSummary: function () {
+    apiSafe('report.exportCsv', { code: 'LEAVE_SUMMARY', params: {} }).then(function (out) {
+      if (!out) return;
+      UI.download(out.filename, out.csv);
+      Toast.ok('ส่งออกแล้ว');
+    });
+  },
+
+  generate: function () {
+    const year = Store.boot.fiscalYear;
+    Modal.confirm('ตั้งสิทธิวันลาประจำปีงบประมาณ ' + year +
+                  ' ให้บุคลากรทุกคน (ยกยอดลาพักผ่อนตามระเบียบ) ใช่หรือไม่')
+      .then(function (yes) {
+        if (!yes) return;
+        apiSafe('leave.generateEntitlements', { periodYear: year }).then(function (out) {
+          if (!out) return;
+          Toast.ok('ตั้งสิทธิวันลาแล้ว ' + Fmt.num(out.rows) + ' รายการ');
+        });
+      });
+  },
+
+  editType: function (id) {
+    const row = (this.types || []).filter(function (t) { return t.id === id; })[0] || {};
+    const fields = [
+      { key: 'code', label: 'รหัส', required: true },
+      { key: 'name_th', label: 'ชื่อประเภทการลา', required: true },
+      { key: 'default_quota', label: 'สิทธิต่อปี (วัน)', type: 'number',
+        hint: 'เว้นว่าง = ไม่จำกัด' },
+      { key: 'max_consecutive', label: 'ลาติดต่อกันได้ไม่เกิน (วัน)', type: 'number' },
+      { key: 'min_service_months', label: 'อายุงานขั้นต่ำ (เดือน)', type: 'number' },
+      { key: 'allow_carry_over', label: 'สะสมข้ามปี', type: 'checkbox',
+        checkboxLabel: 'ยกยอดคงเหลือไปปีถัดไปได้' },
+      { key: 'carry_over_max', label: 'สะสมได้ไม่เกิน (วัน)', type: 'number' },
+      { key: 'require_attachment', label: 'ต้องแนบเอกสาร', type: 'checkbox',
+        checkboxLabel: 'บังคับแนบเอกสารประกอบ' },
+      { key: 'deduct_salary_rate', label: 'อัตราหักเงินเดือน', type: 'number',
+        attrs: 'step="0.01" min="0" max="1"', hint: '0 = ไม่หัก, 1 = หักเต็มจำนวน' },
+      { key: 'sort_order', label: 'ลำดับการแสดง', type: 'number' },
+      { key: 'is_active', label: 'เปิดใช้งาน', type: 'checkbox', checkboxLabel: 'เปิดใช้งาน' }
+    ];
+    Modal.open({
+      title: 'แก้ไขประเภทการลา',
+      body: Form.html(fields, row),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            if (id) data.id = id;
+            return api('leave.typeSave', data).then(function () {
+              Toast.ok('บันทึกแล้ว');
+              VIEWS.leave.paintPane();
+            });
+          } }
+      ]
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.payroll = {
+  tab: 'me',
+
+  render: function (host) {
+    this.host = host;
+    if (Store.can('payroll.write') && this.tab === 'me') this.tab = 'run';
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'me', label: 'สลิปของฉัน' }];
+    if (Store.can('payroll.write')) {
+      tabs.push({ id: 'run', label: 'รอบประมวลผล' });
+      tabs.push({ id: 'period', label: 'งวดการจ่าย' });
+      tabs.push({ id: 'component', label: 'รายการเงินได้-หัก' });
+    }
+    if (Store.can('payroll.read')) tabs.push({ id: 'cost', label: 'ค่าใช้จ่ายบุคลากร' });
+
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.payroll.setTab') +
+                          '<div id="payPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('payPane');
+
+    if (this.tab === 'me') {
+      return apiSafe('payroll.mySlips', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('สลิปเงินเดือนของฉัน', UI.table([
+          { label: 'งวด', render: function (r) {
+              const p = ((r.payroll_runs || {}).payroll_periods) || {};
+              return Fmt.esc(p.name_th || p.code || '—'); } },
+          { label: 'จ่ายวันที่', render: function (r) {
+              const p = ((r.payroll_runs || {}).payroll_periods) || {};
+              return Fmt.date(p.pay_date, true); } },
+          { label: 'เงินได้รวม', className: 'num', render: function (r) {
+              return Fmt.money(r.gross_earning); } },
+          { label: 'เงินหักรวม', className: 'num', render: function (r) {
+              return Fmt.money(r.total_deduction); } },
+          { label: 'จ่ายสุทธิ', className: 'num', render: function (r) {
+              return '<strong>' + Fmt.money(r.net_pay) + '</strong>'; } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.payment_status); } },
+          { label: '', className: 'right', render: function (r) {
+              return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.payroll.openSlip(\'' +
+                     r.id + '\')">ดูสลิป</button>'; } }
+        ], rows, { emptyMessage: 'ยังไม่มีสลิปเงินเดือน' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'run') {
+      return apiSafe('payroll.runList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('รอบประมวลผลเงินเดือน', UI.table([
+          { label: 'รอบ', render: function (r) {
+              return '<strong>' + Fmt.esc(r.run_no || '—') + '</strong>' +
+                '<div class="small muted">' +
+                Fmt.esc((r.payroll_periods || {}).name_th || '') + '</div>'; } },
+          { label: 'ประเภท', key: 'run_type', width: '100px' },
+          { label: 'จำนวนคน', className: 'num', key: 'headcount' },
+          { label: 'เงินได้รวม', className: 'num', render: function (r) {
+              return Fmt.money(r.total_earning); } },
+          { label: 'จ่ายสุทธิ', className: 'num', render: function (r) {
+              return '<strong>' + Fmt.money(r.total_net) + '</strong>'; } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              let b = '';
+              if (['DRAFT', 'CALCULATED'].indexOf(r.status) >= 0 && Store.can('payroll.calculate')) {
+                b += '<button class="btn btn-secondary btn-sm" onclick="VIEWS.payroll.calculate(\'' +
+                     r.id + '\')">ประมวลผล</button> ';
+              }
+              if (r.status === 'CALCULATED' && Store.can('payroll.approve')) {
+                b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.payroll.approve(\'' +
+                     r.id + '\')">อนุมัติ</button> ';
+              }
+              if (r.status === 'APPROVED' && Store.can('payroll.approve')) {
+                b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.payroll.markPaid(\'' +
+                     r.id + '\')">บันทึกจ่าย</button> ' +
+                     '<button class="btn btn-ghost btn-sm" onclick="VIEWS.payroll.bankFile(\'' +
+                     r.id + '\')">ไฟล์ธนาคาร</button> ';
+              }
+              if (r.headcount) {
+                b += '<button class="btn btn-ghost btn-sm" onclick="VIEWS.payroll.viewSlips(\'' +
+                     r.id + '\')">สลิป</button>';
+              }
+              return b; } }
+        ], rows, { emptyMessage: 'ยังไม่มีรอบประมวลผล' }),
+        { tight: true,
+          actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.payroll.createRun()">' +
+                   '+ สร้างรอบใหม่</button>' });
+      });
+    }
+
+    if (this.tab === 'period') {
+      return apiSafe('payroll.periodList', {}, { fallback: [] }).then(function (rows) {
+        VIEWS.payroll.periods = rows;
+        pane.innerHTML = UI.card('งวดการจ่ายเงินเดือน', UI.table([
+          { label: 'รหัสงวด', key: 'code', width: '110px' },
+          { label: 'ชื่องวด', key: 'name_th' },
+          { label: 'ช่วงงวด', render: function (r) {
+              return Fmt.date(r.start_date, true) + ' – ' + Fmt.date(r.end_date, true); } },
+          { label: 'วันจ่าย', render: function (r) { return Fmt.date(r.pay_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } }
+        ], rows, { emptyMessage: 'ยังไม่ได้กำหนดงวดการจ่าย' }),
+        { tight: true,
+          actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.payroll.editPeriod()">' +
+                   '+ งวดใหม่</button>' });
+      });
+    }
+
+    if (this.tab === 'component') {
+      return apiSafe('payroll.componentList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('รายการเงินได้และเงินหัก', UI.table([
+          { label: 'รหัส', key: 'code', width: '90px' },
+          { label: 'ชื่อรายการ', key: 'name_th' },
+          { label: 'ประเภท', render: function (r) {
+              const map = { EARNING: ['เงินได้', 'green'], DEDUCTION: ['เงินหัก', 'rose'],
+                            EMPLOYER_COST: ['ภาระนายจ้าง', 'blue'], INFO: ['ข้อมูล', 'slate'] };
+              const m = map[r.component_type] || ['—', 'slate'];
+              return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>'; } },
+          { label: 'หมวด', key: 'category' },
+          { label: 'วิธีคำนวณ', key: 'calc_method' },
+          { label: 'ค่าตั้งต้น', className: 'num', render: function (r) {
+              if (r.default_percent) return Fmt.percent(r.default_percent, 2);
+              return Fmt.money(r.default_amount); } },
+          { label: 'คิดภาษี', render: function (r) { return r.is_taxable ? 'ใช่' : 'ไม่'; } }
+        ], rows, { emptyMessage: 'ยังไม่ได้กำหนดรายการ' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'cost') {
+      return apiSafe('payroll.costReport', {}, { fallback: [] }).then(function (rows) {
+        const chart = rows.slice(0, 12).reverse().map(function (r) {
+          return { label: r.period_code, value: Math.round(Number(r.total_net) / 1000) };
+        });
+        pane.innerHTML =
+          (chart.length ? UI.card('แนวโน้มค่าใช้จ่าย (พันบาท)', UI.bars(chart)) +
+            '<div class="mt-2"></div>' : '') +
+          UI.card('ค่าใช้จ่ายบุคลากรรายงวด', UI.table([
+            { label: 'งวด', key: 'period_code', width: '110px' },
+            { label: 'จำนวนคน', className: 'num', key: 'headcount' },
+            { label: 'เงินได้รวม', className: 'num', render: function (r) {
+                return Fmt.money(r.total_earning); } },
+            { label: 'เงินหักรวม', className: 'num', render: function (r) {
+                return Fmt.money(r.total_deduction); } },
+            { label: 'จ่ายสุทธิ', className: 'num', render: function (r) {
+                return Fmt.money(r.total_net); } },
+            { label: 'ภาระนายจ้าง', className: 'num', render: function (r) {
+                return Fmt.money(r.total_employer_cost); } },
+            { label: 'ต้นทุนรวม', className: 'num', render: function (r) {
+                return '<strong>' + Fmt.money(r.total_cost) + '</strong>'; } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } }
+          ], rows, { emptyMessage: 'ยังไม่มีข้อมูล' }), { tight: true });
+      });
+    }
+  },
+
+  createRun: function () {
+    apiSafe('payroll.periodList', {}, { fallback: [] }).then(function (periods) {
+      const open = periods.filter(function (p) {
+        return ['OPEN', 'PROCESSING', 'CALCULATED'].indexOf(p.status) >= 0;
+      });
+      if (!open.length) {
+        return Toast.warn('ยังไม่มีงวดการจ่ายที่เปิดอยู่ — กรุณาสร้างงวดก่อน');
+      }
+      const fields = [
+        { key: 'period_id', label: 'งวดการจ่าย', type: 'select', required: true,
+          options: open.map(function (p) { return { value: p.id, label: p.name_th }; }) },
+        { key: 'run_type', label: 'ประเภทรอบ', type: 'select', options: [
+            { value: 'REGULAR', label: 'รอบปกติ' }, { value: 'OFF_CYCLE', label: 'รอบพิเศษ' },
+            { value: 'BONUS', label: 'เงินรางวัล' }, { value: 'RETRO', label: 'เงินตกเบิก' },
+            { value: 'FINAL_PAY', label: 'จ่ายงวดสุดท้าย' }] },
+        { key: 'note', label: 'หมายเหตุ', full: true }
+      ];
+      Modal.open({
+        title: 'สร้างรอบประมวลผลเงินเดือน',
+        body: Form.html(fields, { run_type: 'REGULAR' }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'สร้าง', kind: 'btn-primary', onClick: function (body) {
+              return api('payroll.runCreate', Form.read(body, fields)).then(function () {
+                Toast.ok('สร้างรอบแล้ว');
+                VIEWS.payroll.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  calculate: function (runId) {
+    Modal.confirm('ประมวลผลเงินเดือนรอบนี้ใหม่ทั้งหมด สลิปเดิมของรอบนี้จะถูกแทนที่ ' +
+                  'ต้องการดำเนินการต่อหรือไม่').then(function (yes) {
+      if (!yes) return;
+      Toast.show('กำลังประมวลผล อาจใช้เวลาสักครู่…', 'warn', 'โปรดรอ');
+      apiSafe('payroll.calculate', { run_id: runId }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ประมวลผลแล้ว ' + Fmt.num(out.slips) + ' คน · จ่ายสุทธิรวม ' +
+                 Fmt.money(out.run.total_net) + ' บาท');
+        VIEWS.payroll.paintPane();
+      });
+    });
+  },
+
+  approve: function (runId) {
+    Modal.confirm('อนุมัติรอบประมวลผลนี้ หลังอนุมัติจะแก้ไขไม่ได้').then(function (yes) {
+      if (!yes) return;
+      apiSafe('payroll.runApprove', { run_id: runId }).then(function (out) {
+        if (!out) return;
+        Toast.ok('อนุมัติรอบแล้ว');
+        VIEWS.payroll.paintPane();
+      });
+    });
+  },
+
+  markPaid: function (runId) {
+    Modal.confirm('บันทึกว่าจ่ายเงินเดือนรอบนี้แล้ว').then(function (yes) {
+      if (!yes) return;
+      apiSafe('payroll.runMarkPaid', { run_id: runId }).then(function (out) {
+        if (!out) return;
+        Toast.ok('บันทึกการจ่ายแล้ว');
+        VIEWS.payroll.paintPane();
+      });
+    });
+  },
+
+  bankFile: function (runId) {
+    apiSafe('payroll.bankFile', { run_id: runId }).then(function (out) {
+      if (!out) return;
+      UI.download('bank_transfer_' + Fmt.today() + '.csv', '﻿' + out.csv);
+      Toast.ok('สร้างไฟล์นำเข้าธนาคาร ' + Fmt.num(out.rows) + ' รายการ');
+      if (out.missingAccount && out.missingAccount.length) {
+        Toast.warn('ไม่มีเลขบัญชี ' + out.missingAccount.length + ' คน: ' +
+                   out.missingAccount.slice(0, 3).join(', ') +
+                   (out.missingAccount.length > 3 ? ' …' : ''));
+      }
+    });
+  },
+
+  viewSlips: function (runId) {
+    Modal.open({ title: 'สลิปในรอบนี้', size: 'wide', body: UI.loading(4) });
+    apiSafe('payroll.slipList', { run_id: runId }, { fallback: [] }).then(function (rows) {
+      const body = document.querySelector('.modal-scrim:last-child .modal-body');
+      if (!body) return;
+      body.innerHTML = UI.table([
+        { label: 'รหัส', key: 'emp_code', width: '90px' },
+        { label: 'ชื่อ-สกุล', key: 'full_name' },
+        { label: 'เงินได้', className: 'num', render: function (r) {
+            return Fmt.money(r.gross_earning); } },
+        { label: 'เงินหัก', className: 'num', render: function (r) {
+            return Fmt.money(r.total_deduction); } },
+        { label: 'สุทธิ', className: 'num', render: function (r) {
+            return '<strong>' + Fmt.money(r.net_pay) + '</strong>'; } },
+        { label: '', className: 'right', render: function (r) {
+            return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.payroll.openSlip(\'' +
+                   r.id + '\')">ดู</button>'; } }
+      ], rows, { emptyMessage: 'ยังไม่มีสลิปในรอบนี้' });
+    });
+  },
+
+  openSlip: function (id) {
+    Modal.open({ title: 'สลิปเงินเดือน', size: 'wide', body: UI.loading(4),
+      buttons: [{ label: 'พิมพ์', kind: 'btn-secondary', close: false,
+                  onClick: function () { window.print(); return false; } },
+                { label: 'ปิด' }] });
+
+    apiSafe('payroll.slipGet', { id: id }).then(function (s) {
+      const body = document.querySelector('.modal-scrim:last-child .modal-body');
+      if (!body || !s) return;
+      const period = ((s.payroll_runs || {}).payroll_periods) || {};
+      const earnings = (s.items || []).filter(function (i) { return i.component_type === 'EARNING'; });
+      const deductions = (s.items || []).filter(function (i) { return i.component_type === 'DEDUCTION'; });
+
+      function itemRows(list) {
+        return list.length ? list.map(function (i) {
+          return '<tr><td>' + Fmt.esc(i.component_name) +
+            (i.calc_note ? '<div class="xsmall muted">' + Fmt.esc(i.calc_note) + '</div>' : '') +
+            '</td><td class="num">' + Fmt.money(i.amount) + '</td></tr>';
+        }).join('') : '<tr><td colspan="2" class="muted small">— ไม่มีรายการ —</td></tr>';
+      }
+
+      body.innerHTML =
+        UI.defList([
+          ['งวด', Fmt.esc(period.name_th || period.code || '—')],
+          ['วันจ่าย', Fmt.date(period.pay_date)],
+          ['รหัสบุคลากร', Fmt.esc(s.emp_code)],
+          ['ชื่อ-สกุล', Fmt.esc(s.full_name)],
+          ['ตำแหน่ง', Fmt.esc(s.position_name || '—')],
+          ['สังกัด', Fmt.esc(s.department_name || '—')]
+        ]) +
+        '<div class="grid grid-2 mt-3">' +
+        '<div><h3 style="font-size:14px" class="mb-1">รายการเงินได้</h3>' +
+        '<div class="table-wrap"><table><tbody>' + itemRows(earnings) +
+        '<tr><td><strong>รวมเงินได้</strong></td><td class="num"><strong>' +
+        Fmt.money(s.gross_earning) + '</strong></td></tr></tbody></table></div></div>' +
+        '<div><h3 style="font-size:14px" class="mb-1">รายการเงินหัก</h3>' +
+        '<div class="table-wrap"><table><tbody>' + itemRows(deductions) +
+        '<tr><td><strong>รวมเงินหัก</strong></td><td class="num"><strong>' +
+        Fmt.money(s.total_deduction) + '</strong></td></tr></tbody></table></div></div>' +
+        '</div>' +
+        '<div class="card mt-3" style="background:#f1efe6"><div class="card-body">' +
+        '<div class="row between"><strong style="font-size:16px">จ่ายสุทธิ</strong>' +
+        '<strong style="font-size:22px;font-family:Prompt">' + Fmt.money(s.net_pay) +
+        ' บาท</strong></div>' +
+        '<div class="small muted mt-1">(' + Fmt.esc(s.net_pay_text || '') + ')</div>' +
+        '</div></div>';
+    });
+  },
+
+  editPeriod: function () {
+    const now = new Date();
+    const fy = Store.boot.fiscalYear;
+    const fields = [
+      { key: 'code', label: 'รหัสงวด', required: true, placeholder: fy + '-01' },
+      { key: 'name_th', label: 'ชื่องวด', required: true },
+      { key: 'period_year', label: 'ปี (พ.ศ.)', type: 'number', required: true },
+      { key: 'period_month', label: 'เดือน (1-12)', type: 'number', required: true },
+      { key: 'start_date', label: 'วันเริ่มงวด', type: 'date', required: true },
+      { key: 'end_date', label: 'วันสิ้นงวด', type: 'date', required: true },
+      { key: 'cutoff_date', label: 'วันตัดยอด', type: 'date' },
+      { key: 'pay_date', label: 'วันจ่ายเงิน', type: 'date', required: true }
+    ];
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    Modal.open({
+      title: 'สร้างงวดการจ่าย',
+      body: Form.html(fields, {
+        period_year: fy, period_month: now.getMonth() + 1,
+        start_date: Fmt.today().slice(0, 8) + '01',
+        end_date: last.getFullYear() + '-' + String(last.getMonth() + 1).padStart(2, '0') +
+                  '-' + String(last.getDate()).padStart(2, '0'),
+        code: fy + '-' + String(now.getMonth() + 1).padStart(2, '0'),
+        name_th: 'งวดเดือน' + Fmt.TH_MONTHS[now.getMonth()] + ' ' + (now.getFullYear() + 543)
+      }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            return api('payroll.periodSave', Form.read(body, fields)).then(function () {
+              Toast.ok('สร้างงวดแล้ว');
+              VIEWS.payroll.paintPane();
+            });
+          } }
+      ]
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.benefit = {
+  tab: 'me',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'me', label: 'สิทธิของฉัน' }, { id: 'claim', label: 'การเบิกจ่าย' }];
+    if (Store.can('benefit.write')) tabs.push({ id: 'plan', label: 'แผนสวัสดิการ' });
+    if (Store.can('health.read')) tabs.push({ id: 'health', label: 'ตรวจสุขภาพ' });
+
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.benefit.setTab') +
+                          '<div id="benPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('benPane');
+
+    if (this.tab === 'me') {
+      return apiSafe('benefit.myBenefits', {}, { fallback: { usage: [], enrollments: [], loans: [] } })
+        .then(function (d) {
+          pane.innerHTML =
+            '<div class="grid grid-3 mb-2">' + (d.usage || []).map(function (u) {
+              return '<div class="stat blue">' +
+                '<div class="stat-label">' + Fmt.esc(u.plan_name) + '</div>' +
+                '<div class="stat-value">' + Fmt.money(u.remaining_amount, 0) + '</div>' +
+                '<div class="stat-sub">คงเหลือจากวงเงิน ' + Fmt.money(u.annual_limit, 0) + ' บาท</div>' +
+                '<div class="mt-1">' + UI.meter(u.used_amount, u.annual_limit) + '</div></div>';
+            }).join('') + '</div>' +
+            UI.card('สิทธิที่ได้รับ', UI.table([
+              { label: 'สวัสดิการ', render: function (e) {
+                  return Fmt.esc((e.benefit_plans || {}).name_th || '—'); } },
+              { label: 'ประเภท', render: function (e) {
+                  return Fmt.esc((e.benefit_plans || {}).benefit_type || '—'); } },
+              { label: 'เริ่มคุ้มครอง', render: function (e) {
+                  return Fmt.date(e.enrolled_date, true); } },
+              { label: 'เลขกรมธรรม์', key: 'policy_no' },
+              { label: 'สถานะ', render: function (e) {
+                  return Labels.badge('request_status', e.status === 'ACTIVE' ? 'APPROVED' : e.status); } }
+            ], d.enrollments, { emptyMessage: 'ยังไม่ได้ลงทะเบียนสวัสดิการ' }), { tight: true }) +
+            ((d.loans || []).length
+              ? '<div class="mt-2"></div>' + UI.card('เงินกู้สวัสดิการ', UI.table([
+                  { label: 'เลขที่สัญญา', key: 'loan_no' },
+                  { label: 'ประเภท', key: 'loan_type' },
+                  { label: 'เงินต้น', className: 'num', render: function (l) {
+                      return Fmt.money(l.principal); } },
+                  { label: 'ผ่อนต่องวด', className: 'num', render: function (l) {
+                      return Fmt.money(l.installment_amount); } },
+                  { label: 'ชำระแล้ว', className: 'num', render: function (l) {
+                      return l.paid_installments + '/' + l.installments + ' งวด'; } },
+                  { label: 'คงเหลือ', className: 'num', render: function (l) {
+                      return Fmt.money(l.outstanding); } }
+                ], d.loans), { tight: true })
+              : '');
+        });
+    }
+
+    if (this.tab === 'claim') {
+      const mine = !Store.can('benefit.approve');
+      return apiSafe('benefit.claimList', { mine: mine, limit: 100 }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.card(mine ? 'คำขอเบิกของฉัน' : 'คำขอเบิกสวัสดิการ', UI.table([
+            { label: 'เลขที่', key: 'claim_no', width: '110px' },
+            mine ? null : { label: 'ผู้ขอเบิก', render: function (r) {
+                return employeeLink(r.employee_id, empName(r.employees),
+                                    (r.employees || {}).emp_code); } },
+            { label: 'สวัสดิการ', render: function (r) {
+                return Fmt.esc((r.benefit_plans || {}).name_th || '—'); } },
+            { label: 'วันที่ขอ', render: function (r) { return Fmt.date(r.claim_date, true); } },
+            { label: 'ขอเบิก', className: 'num', render: function (r) {
+                return Fmt.money(r.claim_amount); } },
+            { label: 'อนุมัติ', className: 'num', render: function (r) {
+                return r.approved_amount === null ? '—' : Fmt.money(r.approved_amount); } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } },
+            { label: '', className: 'right', render: function (r) {
+                return (Store.can('benefit.approve') &&
+                        ['SUBMITTED', 'REVIEWING'].indexOf(r.status) >= 0)
+                  ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.benefit.actClaim(\'' +
+                    r.id + '\',\'APPROVE\',' + Number(r.claim_amount) + ')">อนุมัติ</button> ' +
+                    '<button class="btn btn-danger-soft btn-sm" onclick="VIEWS.benefit.actClaim(\'' +
+                    r.id + '\',\'REJECT\')">ไม่อนุมัติ</button>' : ''; } }
+          ].filter(Boolean), rows, { emptyMessage: 'ไม่มีคำขอเบิก' }),
+          { tight: true,
+            actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.benefit.createClaim()">' +
+                     '+ ขอเบิก</button>' });
+        });
+    }
+
+    if (this.tab === 'plan') {
+      return apiSafe('benefit.planList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('แผนสวัสดิการ', UI.table([
+          { label: 'รหัส', key: 'code', width: '100px' },
+          { label: 'ชื่อสวัสดิการ', key: 'name_th' },
+          { label: 'ประเภท', key: 'benefit_type' },
+          { label: 'ผู้ให้บริการ', key: 'provider' },
+          { label: 'วงเงินต่อปี', className: 'num', render: function (r) {
+              return r.annual_limit ? Fmt.money(r.annual_limit, 0) : 'ไม่จำกัด'; } },
+          { label: 'ต่อครั้ง', className: 'num', render: function (r) {
+              return r.per_claim_limit ? Fmt.money(r.per_claim_limit, 0) : '—'; } },
+          { label: 'ครอบครัว', render: function (r) {
+              return r.family_covered ? '<span class="badge badge-green">คุ้มครอง</span>' : '—'; } }
+        ], rows, { emptyMessage: 'ยังไม่ได้กำหนดแผนสวัสดิการ' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'health') {
+      const year = new Date().getFullYear();
+      return apiSafe('benefit.checkupList', { year: year }, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ผลตรวจสุขภาพประจำปี ' + (year + 543), UI.table([
+          { label: 'บุคลากร', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'วันที่ตรวจ', render: function (r) { return Fmt.date(r.checkup_date, true); } },
+          { label: 'สถานพยาบาล', key: 'provider' },
+          { label: 'ระดับความเสี่ยง', render: function (r) {
+              const map = { NORMAL: ['ปกติ', 'green'], WATCH: ['เฝ้าระวัง', 'amber'],
+                            RISK: ['เสี่ยง', 'amber'], ABNORMAL: ['ผิดปกติ', 'rose'] };
+              const m = map[r.risk_level];
+              return m ? '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>' : '—'; } },
+          { label: 'ต้องติดตาม', render: function (r) {
+              return r.followup_needed ? '<span class="badge badge-rose">ใช่</span>' : '—'; } }
+        ], rows, { emptyMessage: 'ยังไม่มีผลตรวจสุขภาพของปีนี้' }), { tight: true });
+      });
+    }
+  },
+
+  createClaim: function () {
+    apiSafe('benefit.planList', {}, { fallback: [] }).then(function (plans) {
+      const fields = [
+        { key: 'plan_id', label: 'สวัสดิการ', type: 'select', required: true,
+          options: plans.filter(function (p) { return p.is_active !== false; })
+                        .map(function (p) { return { value: p.id, label: p.name_th }; }) },
+        { key: 'service_date', label: 'วันที่รับบริการ', type: 'date' },
+        { key: 'claimant_name', label: 'ผู้ใช้สิทธิ', placeholder: 'ตนเอง / ชื่อบุคคลในครอบครัว' },
+        { key: 'claimant_relation', label: 'ความสัมพันธ์' },
+        { key: 'provider_name', label: 'สถานพยาบาล/ร้านค้า' },
+        { key: 'claim_amount', label: 'จำนวนเงินที่ขอเบิก', type: 'money', required: true },
+        { key: 'receipt_url', label: 'ลิงก์ใบเสร็จ', full: true,
+          hint: 'อัปโหลดใบเสร็จไว้ที่ Google Drive แล้ววางลิงก์' },
+        { key: 'description', label: 'รายละเอียด', type: 'textarea', full: true }
+      ];
+      Modal.open({
+        title: 'ยื่นขอเบิกสวัสดิการ',
+        body: Form.html(fields, { service_date: Fmt.today() }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'ยื่นคำขอ', kind: 'btn-primary', onClick: function (body) {
+              return api('benefit.claimSave', Form.read(body, fields)).then(function () {
+                Toast.ok('ยื่นคำขอเบิกแล้ว');
+                VIEWS.benefit.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  actClaim: function (id, action, claimAmount) {
+    if (action === 'REJECT') {
+      return Modal.prompt('ไม่อนุมัติคำขอเบิก', 'เหตุผล', { required: true })
+        .then(function (reason) {
+          if (!reason) return;
+          apiSafe('benefit.claimAct', { id: id, action: 'REJECT', reason: reason })
+            .then(function (out) {
+              if (!out) return;
+              Toast.ok('บันทึกแล้ว');
+              VIEWS.benefit.paintPane();
+            });
+        });
+    }
+    const fields = [{ key: 'approved_amount', label: 'จำนวนเงินที่อนุมัติ',
+                      type: 'money', required: true }];
+    Modal.open({
+      title: 'อนุมัติคำขอเบิก',
+      size: 'narrow',
+      body: Form.html(fields, { approved_amount: claimAmount }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'อนุมัติ', kind: 'btn-primary', onClick: function (body) {
+            const d = Form.read(body, fields);
+            return api('benefit.claimAct', {
+              id: id, action: 'APPROVE', approved_amount: d.approved_amount
+            }).then(function () {
+              Toast.ok('อนุมัติแล้ว');
+              VIEWS.benefit.paintPane();
+            });
+          } }
+      ]
+    });
+  }
+};
+</script>

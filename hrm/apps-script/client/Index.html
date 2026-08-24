@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>HRM — ระบบบริหารงานบุคคล</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@500;600;700;800&display=swap" rel="stylesheet">
+<?!= include('client/Styles') ?>
+</head>
+<body>
+
+<div id="boot" class="boot">
+  <div class="boot-card">
+    <div class="boot-mark">HRM</div>
+    <div class="boot-title">ระบบบริหารงานบุคคล</div>
+    <div class="boot-sub" id="bootMsg">กำลังตรวจสอบสิทธิการเข้าใช้งาน…</div>
+    <div class="boot-bar"><span></span></div>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">HRM</div>
+      <div class="brand-text">
+        <strong id="orgName">—</strong>
+        <span>ระบบบริหารงานบุคคล</span>
+      </div>
+      <button class="icon-btn sidebar-close" onclick="Shell.toggleNav(false)" aria-label="ปิดเมนู">✕</button>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="me" id="me"></div>
+    </div>
+  </aside>
+
+  <div class="sidebar-scrim" id="scrim" onclick="Shell.toggleNav(false)"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn nav-toggle" onclick="Shell.toggleNav(true)" aria-label="เปิดเมนู">☰</button>
+      <div class="crumb">
+        <h1 id="pageTitle">แดชบอร์ด</h1>
+        <span id="pageSub"></span>
+      </div>
+      <div class="topbar-actions">
+        <span class="chip" id="fiscalChip"></span>
+        <button class="icon-btn" id="bellBtn" onclick="Shell.openNotifications()" aria-label="การแจ้งเตือน">
+          🔔<span class="dot hidden" id="bellDot"></span>
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="Shell.reload()">รีเฟรช</button>
+      </div>
+    </header>
+
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+<div id="modalHost"></div>
+
+<?!= include('client/Core') ?>
+<?!= include('client/Shell') ?>
+<?!= include('client/ViewsCore') ?>
+<?!= include('client/ViewsPeople') ?>
+<?!= include('client/ViewsWork') ?>
+<?!= include('client/ViewsAdmin') ?>
+<script>
+  document.addEventListener('DOMContentLoaded', function () { Shell.start(); });
+</script>
+</body>
+</html>
