@@ -105,9 +105,9 @@ begin
   end if;
 end$$;
 
--- ป้องกันการลาซ้อนวัน (เฉพาะใบที่ยังมีผล)
+-- ดัชนีช่วงวันที่ (ใช้ตรวจการลาซ้อนวันอย่างรวดเร็ว) - ต้องมี btree_gist
 create index if not exists idx_leave_overlap on leave_requests
-  using gist (employee_id with =, daterange(start_date, end_date, '[]') with &&)
+  using gist (employee_id, daterange(start_date, end_date, '[]'))
   where status in ('PENDING','APPROVED');
 
 -- ผู้ปฏิบัติราชการแทน / มอบอำนาจอนุมัติ
@@ -255,6 +255,22 @@ begin
     raise exception 'ประเภทการลา % ต้องแนบเอกสารประกอบ', v_lt.name_th;
   end if;
 
+  -- ห้ามลาซ้อนกับใบที่ยังมีผล
+  if exists (
+    select 1 from leave_requests x
+    where x.employee_id = v_lr.employee_id
+      and x.id <> v_lr.id
+      and x.status in ('PENDING','APPROVED')
+      and daterange(x.start_date, x.end_date, '[]')
+          && daterange(v_lr.start_date, v_lr.end_date, '[]')
+      -- อนุญาตครึ่งวันเช้า/บ่ายในวันเดียวกัน
+      and not (x.half_day is not null and v_lr.half_day is not null
+               and x.half_day <> v_lr.half_day
+               and x.start_date = v_lr.start_date)
+  ) then
+    raise exception 'มีใบลาที่ยังมีผลซ้อนทับช่วงวันที่นี้อยู่แล้ว';
+  end if;
+
   v_days := fn_count_leave_days(v_lr.org_id, v_lr.employee_id, v_lr.start_date, v_lr.end_date, v_lr.half_day);
   if v_days <= 0 then raise exception 'ช่วงวันที่ลาไม่มีวันทำการ'; end if;
 
@@ -273,11 +289,16 @@ begin
     end if;
   end if;
 
-  -- เลือก flow อนุมัติ
+  -- เลือก flow อนุมัติที่เงื่อนไขตรงที่สุด (days_gte สูงสุดที่ยังไม่เกินจำนวนวันที่ลา)
   select * into v_flow from approval_flows
    where org_id = v_lr.org_id and entity_type = 'LEAVE_REQUEST' and is_active
-   order by coalesce((condition->>'days_gte')::numeric, -1) desc
+     and coalesce((condition->>'days_gte')::numeric, 0) <= v_days
+   order by coalesce((condition->>'days_gte')::numeric, 0) desc
    limit 1;
+
+  if v_flow.id is null then
+    raise exception 'ยังไม่ได้ตั้งค่าสายอนุมัติใบลาขององค์กรนี้';
+  end if;
 
   insert into approval_requests (org_id, flow_id, entity_type, entity_id, requested_by, summary, created_by)
   values (v_lr.org_id, v_flow.id, 'LEAVE_REQUEST', v_lr.id,
