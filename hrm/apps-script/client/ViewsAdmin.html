@@ -1,0 +1,1673 @@
+<script>
+/* =============================================================================
+   HRM :: ViewsAdmin.html
+   โมดูล 09 Performance, 10 Training, 11 Career, 12 Document, 13 Discipline,
+          14 Offboarding, 15 Reports, Audit, Admin
+   ============================================================================= */
+
+VIEWS.performance = {
+  tab: 'me',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'me', label: 'การประเมินของฉัน' }];
+    if (Store.can('performance.write')) tabs.push({ id: 'appraise', label: 'ประเมินผู้ใต้บังคับบัญชา' });
+    if (Store.can('performance.read')) {
+      tabs.push({ id: 'cycle', label: 'รอบการประเมิน' });
+      tabs.push({ id: 'merit', label: 'เลื่อนเงินเดือน' });
+    }
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.performance.setTab') +
+                          '<div id="perfPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('perfPane');
+
+    if (this.tab === 'me' || this.tab === 'appraise') {
+      const asAppraiser = this.tab === 'appraise';
+      return apiSafe('performance.list',
+                     asAppraiser ? { asAppraiser: true } : { mine: true },
+                     { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card(asAppraiser ? 'ใบประเมินที่ฉันเป็นผู้ประเมิน' : 'ผลการประเมินของฉัน',
+          UI.table([
+            { label: 'รอบ', render: function (r) {
+                return Fmt.esc((r.appraisal_cycles || {}).name_th || '—'); } },
+            asAppraiser ? { label: 'ผู้รับการประเมิน', render: function (r) {
+                return employeeLink(r.employee_id, empName(r.employees),
+                                    (r.employees || {}).emp_code); } } : null,
+            { label: 'คะแนนผลงาน', className: 'num', render: function (r) {
+                return r.kpi_score === null ? '—' : Fmt.money(r.kpi_score, 2); } },
+            { label: 'คะแนนสมรรถนะ', className: 'num', render: function (r) {
+                return r.competency_score === null ? '—' : Fmt.money(r.competency_score, 2); } },
+            { label: 'รวม', className: 'num', render: function (r) {
+                return r.total_score === null ? '—'
+                  : '<strong>' + Fmt.money(r.total_score, 2) + '</strong>'; } },
+            { label: 'ระดับ', render: function (r) {
+                return r.rating_code
+                  ? '<span class="badge badge-green">' + Fmt.esc(r.rating_code) + ' · ' +
+                    Fmt.esc(r.rating_label || '') + '</span>' : '—'; } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } },
+            { label: '', className: 'right', render: function (r) {
+                return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.performance.open(\'' +
+                       r.id + '\',\'' + (asAppraiser ? 'APPRAISER' : 'SELF') + '\')">เปิด</button>'; } }
+          ].filter(Boolean), rows, { emptyMessage: 'ยังไม่มีใบประเมิน' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'cycle') {
+      return apiSafe('performance.cycleList', {}, { fallback: [] }).then(function (rows) {
+        VIEWS.performance.cycles = rows;
+        pane.innerHTML = UI.card('รอบการประเมินผลการปฏิบัติงาน', UI.table([
+          { label: 'รหัส', key: 'code', width: '100px' },
+          { label: 'ชื่อรอบ', key: 'name_th' },
+          { label: 'ปีงบประมาณ', className: 'num', key: 'fiscal_year' },
+          { label: 'ช่วงประเมิน', render: function (r) {
+              return Fmt.date(r.start_date, true) + ' – ' + Fmt.date(r.end_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return '<span class="badge badge-blue">' + Fmt.esc(r.status) + '</span>'; } },
+          { label: '', className: 'right', render: function (r) {
+              return Store.can('performance.write')
+                ? '<button class="btn btn-secondary btn-sm" onclick="VIEWS.performance.openCycle(\'' +
+                  r.id + '\')">เปิดรอบ</button>' : ''; } }
+        ], rows, { emptyMessage: 'ยังไม่มีรอบการประเมิน' }),
+        { tight: true,
+          actions: Store.can('performance.write')
+            ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.performance.editCycle()">' +
+              '+ สร้างรอบ</button>' : '' });
+      });
+    }
+
+    if (this.tab === 'merit') {
+      return apiSafe('performance.meritList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('การเลื่อนเงินเดือนตามผลประเมิน', UI.table([
+          { label: 'บุคลากร', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'ระดับผลงาน', render: function (r) {
+              return r.rating_code
+                ? '<span class="badge badge-green">' + Fmt.esc(r.rating_code) + '</span>' : '—'; } },
+          { label: 'ร้อยละ', className: 'num', render: function (r) {
+              return Fmt.percent(r.increase_percent, 2); } },
+          { label: 'เดิม', className: 'num', render: function (r) {
+              return Fmt.money(r.old_salary); } },
+          { label: 'ใหม่', className: 'num', render: function (r) {
+              return '<strong>' + Fmt.money(r.new_salary) + '</strong>'; } },
+          { label: 'มีผลวันที่', render: function (r) { return Fmt.date(r.effective_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } }
+        ], rows, { emptyMessage: 'ยังไม่มีรายการเลื่อนเงินเดือน' }),
+        { tight: true,
+          actions: Store.can('performance.write')
+            ? '<button class="btn btn-secondary btn-sm" onclick="VIEWS.performance.proposeMerit()">' +
+              'เสนอเลื่อนเงินเดือน</button>' : '' });
+      });
+    }
+  },
+
+  open: function (id, mode) {
+    Modal.open({ title: 'ใบประเมินผลการปฏิบัติงาน', size: 'wide', body: UI.loading(5) });
+    apiSafe('performance.get', { id: id }).then(function (ap) {
+      const scrim = document.querySelector('.modal-scrim:last-child');
+      const body = scrim && scrim.querySelector('.modal-body');
+      if (!body || !ap) return;
+
+      const editable = (mode === 'SELF' && ['DRAFT', 'SELF_SUBMITTED'].indexOf(ap.status) >= 0) ||
+                       (mode === 'APPRAISER' &&
+                        ['APPROVED', 'ACKNOWLEDGED', 'CLOSED'].indexOf(ap.status) < 0);
+
+      const sections = { KPI: 'ผลสัมฤทธิ์ของงาน', COMPETENCY: 'สมรรถนะ', BEHAVIOR: 'พฤติกรรม' };
+      const grouped = {};
+      (ap.scores || []).forEach(function (s) {
+        (grouped[s.section] = grouped[s.section] || []).push(s);
+      });
+
+      let html = UI.defList([
+        ['รอบ', Fmt.esc((ap.appraisal_cycles || {}).name_th || '—')],
+        ['ผู้รับการประเมิน', Fmt.esc(empName(ap.employees))],
+        ['สถานะ', Labels.badge('request_status', ap.status)],
+        ['คะแนนรวม', ap.total_score === null ? '—' : Fmt.money(ap.total_score, 2)],
+        ['ระดับ', Fmt.esc(ap.rating_label || '—')]
+      ]);
+
+      Object.keys(grouped).forEach(function (sec) {
+        html += '<h3 class="mt-3 mb-1" style="font-size:14px">' +
+                Fmt.esc(sections[sec] || sec) + '</h3>' +
+                '<div class="table-wrap"><table><thead><tr>' +
+                '<th>หัวข้อ</th><th class="num">น้ำหนัก</th><th class="num">เต็ม</th>' +
+                '<th class="num">ประเมินตนเอง</th><th class="num">ผู้ประเมิน</th></tr></thead><tbody>' +
+                grouped[sec].map(function (s) {
+                  const field = editable
+                    ? '<input class="field" type="number" step="0.5" min="0" max="' +
+                      s.max_score + '" style="width:80px;text-align:right" ' +
+                      'data-score-id="' + s.id + '" value="' +
+                      (mode === 'SELF' ? (s.self_score === null ? '' : s.self_score)
+                                       : (s.appraiser_score === null ? '' : s.appraiser_score)) + '">'
+                    : null;
+                  return '<tr><td>' + Fmt.esc(s.item_title) + '</td>' +
+                    '<td class="num">' + Fmt.percent(s.weight_percent, 0) + '</td>' +
+                    '<td class="num">' + Fmt.money(s.max_score, 0) + '</td>' +
+                    '<td class="num">' + (mode === 'SELF' && editable ? field
+                      : (s.self_score === null ? '—' : Fmt.money(s.self_score, 1))) + '</td>' +
+                    '<td class="num">' + (mode === 'APPRAISER' && editable ? field
+                      : (s.appraiser_score === null ? '—' : Fmt.money(s.appraiser_score, 1))) +
+                    '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+      });
+
+      if (editable) {
+        html += '<div class="field-group mt-3"><label class="field-label">ความเห็นเพิ่มเติม</label>' +
+                '<textarea class="field" id="apComment">' +
+                Fmt.esc(mode === 'SELF' ? (ap.self_comment || '') : (ap.appraiser_comment || '')) +
+                '</textarea></div>';
+      } else {
+        html += '<div class="mt-3">' + UI.defList([
+          ['ความเห็นผู้รับการประเมิน', Fmt.esc(ap.self_comment || '—')],
+          ['ความเห็นผู้ประเมิน', Fmt.esc(ap.appraiser_comment || '—')],
+          ['จุดแข็ง', Fmt.esc(ap.strengths || '—')],
+          ['สิ่งที่ควรพัฒนา', Fmt.esc(ap.improvements || '—')]
+        ]) + '</div>';
+      }
+
+      body.innerHTML = html;
+
+      // ปุ่มท้าย modal
+      const foot = scrim.querySelector('.modal-foot');
+      const buttons = [];
+      if (editable) {
+        buttons.push({ label: 'บันทึกร่าง', kind: 'btn-secondary', submit: false });
+        buttons.push({ label: mode === 'SELF' ? 'ส่งประเมินตนเอง' : 'ส่งผลการประเมิน',
+                       kind: 'btn-primary', submit: true });
+      }
+      if (mode === 'SELF' && ap.status === 'APPROVED') {
+        buttons.push({ label: 'รับทราบผล', kind: 'btn-primary', ack: true });
+      }
+      if (mode === 'APPRAISER' && ['APPRAISED', 'REVIEWED'].indexOf(ap.status) >= 0 &&
+          Store.can('performance.approve')) {
+        buttons.push({ label: 'อนุมัติผลประเมิน', kind: 'btn-primary', approve: true });
+      }
+
+      if (foot) {
+        foot.innerHTML = '';
+        buttons.forEach(function (b) {
+          const btn = document.createElement('button');
+          btn.className = 'btn ' + b.kind;
+          btn.textContent = b.label;
+          btn.onclick = function () {
+            const scores = Array.prototype.map.call(
+              body.querySelectorAll('[data-score-id]'), function (el) {
+                return { id: el.dataset.scoreId,
+                         score: el.value === '' ? null : Number(el.value) };
+              });
+            let p;
+            if (b.ack) p = api('performance.acknowledge', { id: id });
+            else if (b.approve) p = api('performance.approve', { id: id });
+            else p = api('performance.saveScores', {
+              id: id, mode: mode, scores: scores, submit: !!b.submit,
+              comment: (body.querySelector('#apComment') || {}).value || null
+            });
+
+            btn.disabled = true;
+            p.then(function () {
+              Toast.ok('บันทึกแล้ว');
+              Modal.close();
+              VIEWS.performance.paintPane();
+            }).catch(function (e) { Toast.error(e.message); btn.disabled = false; });
+          };
+          foot.appendChild(btn);
+        });
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'btn btn-ghost';
+        closeBtn.textContent = 'ปิด';
+        closeBtn.onclick = function () { Modal.close(); };
+        foot.appendChild(closeBtn);
+      }
+    });
+  },
+
+  editCycle: function () {
+    const fy = Store.boot.fiscalYear;
+    const fields = [
+      { key: 'code', label: 'รหัสรอบ', required: true, placeholder: 'FY' + fy + 'R1' },
+      { key: 'name_th', label: 'ชื่อรอบ', required: true, full: true },
+      { key: 'fiscal_year', label: 'ปีงบประมาณ', type: 'number', required: true },
+      { key: 'round_no', label: 'รอบที่', type: 'number' },
+      { key: 'start_date', label: 'ประเมินตั้งแต่', type: 'date', required: true },
+      { key: 'end_date', label: 'ถึงวันที่', type: 'date', required: true },
+      { key: 'self_eval_due', label: 'กำหนดส่งประเมินตนเอง', type: 'date' },
+      { key: 'supervisor_due', label: 'กำหนดส่งผู้ประเมิน', type: 'date' }
+    ];
+    Modal.open({
+      title: 'สร้างรอบการประเมิน',
+      body: Form.html(fields, {
+        fiscal_year: fy, round_no: 1,
+        name_th: 'รอบที่ 1/' + fy
+      }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            return api('performance.cycleSave', Form.read(body, fields)).then(function () {
+              Toast.ok('สร้างรอบแล้ว');
+              VIEWS.performance.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  openCycle: function (cycleId) {
+    apiSafe('performance.formList', {}, { fallback: [] }).then(function (forms) {
+      const fields = [
+        { key: 'form_id', label: 'แบบประเมินที่ใช้', type: 'select',
+          options: forms.map(function (f) { return { value: f.id, label: f.name_th }; }) }
+      ];
+      Modal.open({
+        title: 'เปิดรอบการประเมิน',
+        body: '<p class="small muted mb-2">ระบบจะสร้างใบประเมินให้บุคลากรทุกคนที่ปฏิบัติงานอยู่ ' +
+              'พร้อมกำหนดผู้ประเมินจากผู้บังคับบัญชาโดยอัตโนมัติ</p>' +
+              Form.html(fields, { form_id: forms.length ? forms[0].id : '' }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'เปิดรอบ', kind: 'btn-primary', onClick: function (body) {
+              const d = Form.read(body, fields);
+              return api('performance.openCycle', { cycle_id: cycleId, form_id: d.form_id })
+                .then(function (out) {
+                  Toast.ok('สร้างใบประเมิน ' + Fmt.num(out.created) + ' ใบ' +
+                           (out.skipped ? ' (ข้าม ' + out.skipped + ' ใบที่มีอยู่แล้ว)' : ''));
+                  VIEWS.performance.paintPane();
+                });
+            } }
+        ]
+      });
+    });
+  },
+
+  proposeMerit: function () {
+    const cycles = this.cycles || [];
+    const fields = [
+      { key: 'cycle_id', label: 'รอบการประเมิน', type: 'select', required: true,
+        options: cycles.map(function (c) { return { value: c.id, label: c.name_th }; }) },
+      { key: 'effective_date', label: 'มีผลตั้งแต่วันที่', type: 'date', required: true }
+    ];
+    Modal.open({
+      title: 'เสนอเลื่อนเงินเดือนตามผลประเมิน',
+      body: '<p class="small muted mb-2">ระบบจะคำนวณจากระดับผลงาน: ' +
+            'A 4% · B 3% · C 2.5% · D 2% · E 0%</p>' + Form.html(fields, {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'เสนอ', kind: 'btn-primary', onClick: function (body) {
+            return api('performance.meritPropose', Form.read(body, fields)).then(function (out) {
+              Toast.ok('เสนอเลื่อนเงินเดือน ' + Fmt.num(out.proposed) + ' รายการ');
+              VIEWS.performance.paintPane();
+            });
+          } }
+      ]
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.training = {
+  tab: 'session',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [
+      { id: 'session', label: 'หลักสูตร/รุ่นอบรม' },
+      { id: 'my', label: 'ประวัติอบรมของฉัน' },
+      { id: 'idp', label: 'แผนพัฒนารายบุคคล' }
+    ];
+    if (Store.can('training.read')) tabs.push({ id: 'summary', label: 'สรุปการพัฒนา' });
+
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.training.setTab') +
+                          '<div id="trPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('trPane');
+
+    if (this.tab === 'session') {
+      return apiSafe('training.sessionList', { limit: 60 }, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('รุ่นการอบรม', UI.table([
+          { label: 'หลักสูตร', render: function (r) {
+              const c = r.training_courses || {};
+              return '<strong>' + Fmt.esc(r.title || c.name_th || '—') + '</strong>' +
+                '<div class="small muted">' + Fmt.esc(c.code || '') +
+                (c.duration_hours ? ' · ' + c.duration_hours + ' ชม.' : '') + '</div>'; } },
+          { label: 'ช่วงวันที่', render: function (r) {
+              return Fmt.date(r.start_date, true) +
+                (r.start_date !== r.end_date ? ' – ' + Fmt.date(r.end_date, true) : ''); } },
+          { label: 'สถานที่', key: 'venue' },
+          { label: 'ที่นั่ง', className: 'num', render: function (r) {
+              return r.max_seats
+                ? Fmt.num(r.registered_count) + '/' + Fmt.num(r.max_seats)
+                : Fmt.num(r.registered_count); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              return ['PLANNED', 'OPEN'].indexOf(r.status) >= 0
+                ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.training.register(\'' +
+                  r.id + '\')">ลงทะเบียน</button>' : ''; } }
+        ], rows, { emptyMessage: 'ยังไม่มีรุ่นการอบรม' }),
+        { tight: true,
+          actions: Store.can('training.write')
+            ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.training.editSession()">' +
+              '+ เปิดรุ่นอบรม</button>' : '' });
+      });
+    }
+
+    if (this.tab === 'my') {
+      return Promise.all([
+        apiSafe('training.registrationList', { mine: true }, { fallback: [] }),
+        apiSafe('training.recordList', {}, { fallback: [] })
+      ]).then(function (r) {
+        pane.innerHTML =
+          UI.card('การลงทะเบียนของฉัน', UI.table([
+            { label: 'หลักสูตร', render: function (x) {
+                const s = x.training_sessions || {};
+                const c = s.training_courses || {};
+                return Fmt.esc(s.title || c.name_th || '—'); } },
+            { label: 'ช่วงวันที่', render: function (x) {
+                const s = x.training_sessions || {};
+                return Fmt.date(s.start_date, true); } },
+            { label: 'สถานะ', render: function (x) {
+                return Labels.badge('request_status', x.status); } },
+            { label: 'คะแนนหลังอบรม', className: 'num', render: function (x) {
+                return x.post_test_score === null ? '—' : Fmt.money(x.post_test_score, 1); } }
+          ], r[0], { emptyMessage: 'ยังไม่ได้ลงทะเบียนอบรม' }), { tight: true }) +
+          '<div class="mt-2"></div>' +
+          UI.card('ประวัติการอบรม', UI.table([
+            { label: 'หลักสูตร', key: 'course_name' },
+            { label: 'ผู้จัด', key: 'provider' },
+            { label: 'ช่วงวันที่', render: function (x) {
+                return Fmt.date(x.start_date, true); } },
+            { label: 'ชั่วโมง', className: 'num', key: 'hours' },
+            { label: 'หน่วยคะแนน', className: 'num', key: 'cpe_credits' },
+            { label: 'หมดอายุ', render: function (x) {
+                return x.expire_date ? Fmt.date(x.expire_date, true) : '—'; } }
+          ], r[1], { emptyMessage: 'ยังไม่มีประวัติการอบรม' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'idp') {
+      return apiSafe('training.idpGet', {}, { fallback: { plan: null, gaps: [] } })
+        .then(function (d) {
+          const plan = d && d.id ? d : null;
+          pane.innerHTML =
+            UI.card('แผนพัฒนารายบุคคล ปีงบประมาณ ' + Store.boot.fiscalYear,
+              plan
+                ? UI.defList([
+                    ['เป้าหมายความก้าวหน้า', Fmt.esc(plan.career_goal || '—')],
+                    ['ตำแหน่งเป้าหมาย', Fmt.esc((plan.positions || {}).name_th || '—')],
+                    ['สถานะ', Labels.badge('request_status', plan.status)],
+                    ['ความคืบหน้า', Fmt.percent(plan.progress_percent, 0) +
+                      UI.meter(plan.progress_percent, 100)]
+                  ]) +
+                  '<h3 class="mt-3 mb-1" style="font-size:14px">กิจกรรมการพัฒนา</h3>' +
+                  UI.table([
+                    { label: 'กิจกรรม', key: 'title' },
+                    { label: 'วิธีการ', key: 'method' },
+                    { label: 'สมรรถนะ', render: function (a) {
+                        return Fmt.esc((a.competencies || {}).name_th || '—'); } },
+                    { label: 'ระดับ', className: 'num', render: function (a) {
+                        return (a.current_level || 0) + ' → ' + (a.target_level || 0); } },
+                    { label: 'กำหนดเสร็จ', render: function (a) {
+                        return Fmt.date(a.target_date, true); } },
+                    { label: 'สถานะ', render: function (a) {
+                        return Labels.badge('request_status',
+                          a.status === 'COMPLETED' ? 'COMPLETED'
+                          : a.status === 'IN_PROGRESS' ? 'REVIEWING' : 'DRAFT'); } }
+                  ], plan.activities, { emptyMessage: 'ยังไม่มีกิจกรรมการพัฒนา' })
+                : UI.empty('ยังไม่ได้จัดทำแผนพัฒนาของปีนี้',
+                    '<button class="btn btn-primary btn-sm" onclick="VIEWS.training.createIdp()">' +
+                    'จัดทำแผนพัฒนา</button>'),
+              { tight: !!plan,
+                actions: plan
+                  ? '<button class="btn btn-secondary btn-sm" onclick="VIEWS.training.addActivity(\'' +
+                    plan.id + '\')">+ เพิ่มกิจกรรม</button>' : '' }) +
+            '<div class="mt-2"></div>' +
+            UI.card('ช่องว่างสมรรถนะ (Competency Gap)', UI.table([
+              { label: 'สมรรถนะ', key: 'competency_name' },
+              { label: 'ประเภท', key: 'competency_type' },
+              { label: 'ระดับที่ต้องการ', className: 'num', key: 'required_level' },
+              { label: 'ระดับปัจจุบัน', className: 'num', key: 'current_level' },
+              { label: 'ช่องว่าง', className: 'num', render: function (g) {
+                  return g.gap_level > 0
+                    ? '<span style="color:var(--rose-600);font-weight:600">' + g.gap_level + '</span>'
+                    : '<span style="color:var(--moss-600)">ผ่าน</span>'; } }
+            ], (d.gaps || []), { emptyMessage: 'ยังไม่ได้กำหนดสมรรถนะของตำแหน่ง' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'summary') {
+      return apiSafe('training.summary', { fiscalYear: Store.boot.fiscalYear }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.card('สรุปการพัฒนาบุคลากร ปีงบประมาณ ' + Store.boot.fiscalYear,
+            UI.table([
+              { label: 'รหัส', key: 'emp_code', width: '90px' },
+              { label: 'ชื่อ-สกุล', render: function (r) {
+                  return employeeLink(r.employee_id, r.full_name_th); } },
+              { label: 'สังกัด', key: 'department_name' },
+              { label: 'หลักสูตร', className: 'num', key: 'course_count' },
+              { label: 'ชั่วโมงรวม', className: 'num', key: 'total_hours' },
+              { label: 'หน่วยคะแนน', className: 'num', key: 'total_credits' },
+              { label: 'ค่าใช้จ่าย', className: 'num', render: function (r) {
+                  return Fmt.money(r.total_cost); } }
+            ], rows, { emptyMessage: 'ยังไม่มีข้อมูลการอบรมในปีนี้' }), { tight: true });
+        });
+    }
+  },
+
+  register: function (sessionId) {
+    Modal.confirm('ลงทะเบียนเข้าอบรมรุ่นนี้').then(function (yes) {
+      if (!yes) return;
+      apiSafe('training.register', { session_id: sessionId }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ลงทะเบียนแล้ว');
+        VIEWS.training.paintPane();
+      });
+    });
+  },
+
+  editSession: function () {
+    apiSafe('training.courseList', {}, { fallback: [] }).then(function (courses) {
+      if (!courses.length) return Toast.warn('ยังไม่มีหลักสูตรในระบบ');
+      const fields = [
+        { key: 'course_id', label: 'หลักสูตร', type: 'select', required: true,
+          options: courses.map(function (c) { return { value: c.id, label: c.name_th }; }) },
+        { key: 'title', label: 'ชื่อรุ่น', full: true },
+        { key: 'start_date', label: 'วันเริ่ม', type: 'date', required: true },
+        { key: 'end_date', label: 'วันสิ้นสุด', type: 'date', required: true },
+        { key: 'venue', label: 'สถานที่' },
+        { key: 'trainer', label: 'วิทยากร' },
+        { key: 'max_seats', label: 'จำนวนที่นั่ง', type: 'number' },
+        { key: 'budget_amount', label: 'งบประมาณ', type: 'money' },
+        { key: 'status', label: 'สถานะ', type: 'select', options: [
+            { value: 'PLANNED', label: 'วางแผน' }, { value: 'OPEN', label: 'เปิดรับสมัคร' },
+            { value: 'ONGOING', label: 'กำลังอบรม' }, { value: 'COMPLETED', label: 'เสร็จสิ้น' }] }
+      ];
+      Modal.open({
+        title: 'เปิดรุ่นการอบรม',
+        size: 'wide',
+        body: Form.html(fields, { start_date: Fmt.today(), end_date: Fmt.today(), status: 'OPEN' }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+              return api('training.sessionSave', Form.read(body, fields)).then(function () {
+                Toast.ok('เปิดรุ่นอบรมแล้ว');
+                VIEWS.training.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  createIdp: function () {
+    const fields = [
+      { key: 'career_goal', label: 'เป้าหมายความก้าวหน้า', type: 'textarea', full: true },
+      { key: 'summary', label: 'สรุปแผน', type: 'textarea', full: true }
+    ];
+    Modal.open({
+      title: 'จัดทำแผนพัฒนารายบุคคล',
+      body: Form.html(fields, {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const d = Form.read(body, fields);
+            d.employee_id = Store.boot.user.employeeId;
+            d.fiscal_year = Store.boot.fiscalYear;
+            return api('training.idpSave', d).then(function () {
+              Toast.ok('จัดทำแผนพัฒนาแล้ว');
+              VIEWS.training.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  addActivity: function (planId) {
+    apiSafe('training.competencyList', {}, { fallback: [] }).then(function (comps) {
+      const fields = [
+        { key: 'title', label: 'ชื่อกิจกรรม', required: true, full: true },
+        { key: 'method', label: 'วิธีการพัฒนา', type: 'select', options: [
+            { value: 'TRAINING', label: 'ฝึกอบรม' }, { value: 'COACHING', label: 'สอนงาน' },
+            { value: 'MENTORING', label: 'พี่เลี้ยง' }, { value: 'JOB_ROTATION', label: 'หมุนเวียนงาน' },
+            { value: 'ASSIGNMENT', label: 'มอบหมายงาน' }, { value: 'SELF_STUDY', label: 'ศึกษาด้วยตนเอง' },
+            { value: 'CERTIFICATION', label: 'สอบใบรับรอง' }] },
+        { key: 'competency_id', label: 'สมรรถนะที่พัฒนา', type: 'select',
+          options: comps.map(function (c) { return { value: c.id, label: c.name_th }; }) },
+        { key: 'current_level', label: 'ระดับปัจจุบัน', type: 'number' },
+        { key: 'target_level', label: 'ระดับเป้าหมาย', type: 'number' },
+        { key: 'target_date', label: 'กำหนดแล้วเสร็จ', type: 'date' },
+        { key: 'budget', label: 'งบประมาณ', type: 'money' },
+        { key: 'description', label: 'รายละเอียด', type: 'textarea', full: true }
+      ];
+      Modal.open({
+        title: 'เพิ่มกิจกรรมการพัฒนา',
+        size: 'wide',
+        body: Form.html(fields, { method: 'TRAINING' }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+              const d = Form.read(body, fields);
+              d.plan_id = planId;
+              return api('training.idpActivitySave', d).then(function () {
+                Toast.ok('เพิ่มกิจกรรมแล้ว');
+                VIEWS.training.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.career = {
+  tab: 'movement',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [
+      { id: 'movement', label: 'คำสั่งเลื่อน/ย้าย' },
+      { id: 'path', label: 'เส้นทางความก้าวหน้า' },
+      { id: 'succession', label: 'แผนสืบทอดตำแหน่ง' }
+    ];
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.career.setTab') +
+                          '<div id="carPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('carPane');
+
+    if (this.tab === 'movement') {
+      return apiSafe('career.movementList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('คำสั่งเลื่อน/ย้าย/แต่งตั้ง', UI.table([
+          { label: 'บุคลากร', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'ประเภท', render: function (r) {
+              const map = { PROMOTION: 'เลื่อนตำแหน่ง', TRANSFER: 'ย้าย', ROTATION: 'หมุนเวียน',
+                            ACTING: 'รักษาการ', SECONDMENT: 'ช่วยราชการ',
+                            DEMOTION: 'ลดตำแหน่ง', GRADE_CHANGE: 'เลื่อนระดับ',
+                            REASSIGN: 'มอบหมายงานใหม่' };
+              return Fmt.esc(map[r.movement_type] || r.movement_type); } },
+          { label: 'ตำแหน่งใหม่', render: function (r) {
+              return Fmt.esc((r.to_position || {}).name_th || '—') +
+                '<div class="small muted">' + Fmt.esc((r.to_facility || {}).name_th || '') + '</div>'; } },
+          { label: 'มีผลวันที่', render: function (r) { return Fmt.date(r.effective_date, true); } },
+          { label: 'คำสั่งเลขที่', key: 'order_no' },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              let b = '';
+              if (['DRAFT', 'PROPOSED'].indexOf(r.status) >= 0 && Store.can('career.approve')) {
+                b += '<button class="btn btn-secondary btn-sm" onclick="VIEWS.career.approve(\'' +
+                     r.id + '\')">อนุมัติ</button> ';
+              }
+              if (r.status === 'APPROVED' && Store.can('career.approve')) {
+                b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.career.apply(\'' +
+                     r.id + '\')">ดำเนินการ</button>';
+              }
+              return b; } }
+        ], rows, { emptyMessage: 'ยังไม่มีคำสั่ง' }),
+        { tight: true,
+          actions: Store.can('career.write')
+            ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.career.createMovement()">' +
+              '+ ร่างคำสั่ง</button>' : '' });
+      });
+    }
+
+    if (this.tab === 'path') {
+      return apiSafe('career.pathList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('เส้นทางความก้าวหน้าในสายอาชีพ', UI.table([
+          { label: 'จากตำแหน่ง', render: function (r) {
+              return Fmt.esc((r.from_position || {}).name_th || '—'); } },
+          { label: 'ไปตำแหน่ง', render: function (r) {
+              return '<strong>' + Fmt.esc((r.to_position || {}).name_th || '—') + '</strong>'; } },
+          { label: 'ประเภท', key: 'path_type' },
+          { label: 'ครองตำแหน่งเดิม', className: 'num', render: function (r) {
+              return r.min_years_in_position ? r.min_years_in_position + ' ปี' : '—'; } },
+          { label: 'อายุงานรวม', className: 'num', render: function (r) {
+              return r.min_total_years ? r.min_total_years + ' ปี' : '—'; } },
+          { label: 'วุฒิที่ต้องการ', key: 'required_education' },
+          { label: '', className: 'right', render: function (r) {
+              return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.career.candidates(\'' +
+                     r.to_position_id + '\')">ผู้มีคุณสมบัติ</button>'; } }
+        ], rows, { emptyMessage: 'ยังไม่ได้กำหนดเส้นทางความก้าวหน้า' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'succession') {
+      return apiSafe('career.successionList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('แผนสืบทอดตำแหน่ง', UI.table([
+          { label: 'ตำแหน่ง', render: function (r) {
+              return Fmt.esc((r.positions || {}).name_th || '—'); } },
+          { label: 'ผู้ครองตำแหน่ง', render: function (r) {
+              return Fmt.esc(empName(r.incumbent)); } },
+          { label: 'ผู้สืบทอด', render: function (r) {
+              return '<strong>' + Fmt.esc(empName(r.candidate)) + '</strong>'; } },
+          { label: 'ลำดับ', className: 'num', key: 'priority' },
+          { label: 'ความพร้อม', render: function (r) {
+              const map = { READY_NOW: ['พร้อมทันที', 'green'], READY_1_2Y: ['พร้อมใน 1-2 ปี', 'blue'],
+                            READY_3_5Y: ['พร้อมใน 3-5 ปี', 'amber'],
+                            DEVELOPING: ['อยู่ระหว่างพัฒนา', 'slate'] };
+              const m = map[r.readiness] || ['—', 'slate'];
+              return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>'; } },
+          { label: 'ประเด็นที่ต้องพัฒนา', key: 'gap_note' }
+        ], rows, { emptyMessage: 'ยังไม่ได้จัดทำแผนสืบทอดตำแหน่ง' }), { tight: true });
+      });
+    }
+  },
+
+  createMovement: function () {
+    Store.options().then(function (o) {
+      const fields = [
+        { key: 'movement_type', label: 'ประเภท', type: 'select', required: true, options: [
+            { value: 'PROMOTION', label: 'เลื่อนตำแหน่ง' }, { value: 'TRANSFER', label: 'ย้ายหน่วยงาน' },
+            { value: 'ROTATION', label: 'หมุนเวียนงาน' }, { value: 'ACTING', label: 'รักษาการ' },
+            { value: 'SECONDMENT', label: 'ช่วยราชการ' }, { value: 'GRADE_CHANGE', label: 'เลื่อนระดับ' }] },
+        { key: 'effective_date', label: 'มีผลตั้งแต่วันที่', type: 'date', required: true },
+        { key: 'to_facility_id', label: 'สถานบริการใหม่', type: 'select',
+          options: o.facilities.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+        { key: 'to_department_id', label: 'หน่วยงานใหม่', type: 'select',
+          options: o.departments.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+        { key: 'to_position_id', label: 'ตำแหน่งใหม่', type: 'select',
+          options: o.positions.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+        { key: 'to_grade_id', label: 'ระดับใหม่', type: 'select',
+          options: o.grades.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+        { key: 'to_salary', label: 'เงินเดือนใหม่', type: 'money' },
+        { key: 'order_no', label: 'เลขที่คำสั่ง' },
+        { key: 'order_date', label: 'วันที่คำสั่ง', type: 'date' },
+        { key: 'reason', label: 'เหตุผล', type: 'textarea', full: true }
+      ];
+
+      Modal.open({
+        title: 'ร่างคำสั่งเลื่อน/ย้าย',
+        size: 'wide',
+        body: employeePicker('mvEmployee', 'บุคลากรที่ได้รับคำสั่ง') +
+              Form.html(fields, { effective_date: Fmt.today() }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'บันทึกร่าง', kind: 'btn-primary', onClick: function (body) {
+              const d = Form.read(body, fields);
+              d.employee_id = body.querySelector('#f_mvEmployee').value;
+              if (!d.employee_id) throw new Error('กรุณาเลือกบุคลากร');
+              return api('career.movementSave', d).then(function () {
+                Toast.ok('บันทึกร่างคำสั่งแล้ว');
+                VIEWS.career.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  approve: function (id) {
+    Modal.confirm('อนุมัติคำสั่งนี้').then(function (yes) {
+      if (!yes) return;
+      apiSafe('career.movementApprove', { id: id }).then(function (out) {
+        if (!out) return;
+        Toast.ok('อนุมัติแล้ว — กดปุ่ม "ดำเนินการ" เพื่อให้มีผลกับข้อมูลบุคลากร');
+        VIEWS.career.paintPane();
+      });
+    });
+  },
+
+  apply: function (id) {
+    Modal.confirm('ดำเนินการตามคำสั่งนี้ ระบบจะปิดการดำรงตำแหน่งเดิม ' +
+                  'และสร้างการดำรงตำแหน่งใหม่ให้อัตโนมัติ').then(function (yes) {
+      if (!yes) return;
+      apiSafe('career.movementApply', { id: id }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ดำเนินการตามคำสั่งเรียบร้อย');
+        VIEWS.career.paintPane();
+      });
+    });
+  },
+
+  candidates: function (positionId) {
+    Modal.open({ title: 'ผู้มีคุณสมบัติเลื่อนตำแหน่ง', size: 'wide', body: UI.loading(4) });
+    apiSafe('career.eligibleCandidates', { to_position_id: positionId }, { fallback: [] })
+      .then(function (rows) {
+        const body = document.querySelector('.modal-scrim:last-child .modal-body');
+        if (!body) return;
+        body.innerHTML = UI.table([
+          { label: 'บุคลากร', render: function (r) {
+              return '<strong>' + Fmt.esc(r.full_name_th) + '</strong>' +
+                '<div class="small muted">' + Fmt.esc(r.emp_code) + ' · ' +
+                Fmt.esc(r.position_name || '') + '</div>'; } },
+          { label: 'ครองตำแหน่ง', className: 'num', render: function (r) {
+              return r.years_in_position + ' ปี'; } },
+          { label: 'อายุงานรวม', className: 'num', render: function (r) {
+              return r.total_years + ' ปี'; } },
+          { label: 'คุณสมบัติ', render: function (r) {
+              return r.eligible
+                ? '<span class="badge badge-green">ครบถ้วน</span>'
+                : '<span class="badge badge-amber">ยังไม่ครบ</span>' +
+                  '<div class="xsmall muted">' +
+                  Fmt.esc((r.blocking_reasons || []).join(' · ')) + '</div>'; } }
+        ], rows, { emptyMessage: 'ไม่พบผู้มีคุณสมบัติ' });
+      });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.document = {
+  tab: 'request',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [{ id: 'request', label: 'คำขอเอกสาร' }];
+    if (Store.can('document.read')) {
+      tabs.push({ id: 'issued', label: 'ทะเบียนเอกสารที่ออก' });
+      tabs.push({ id: 'order', label: 'ทะเบียนคำสั่ง' });
+    }
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.document.setTab') +
+                          '<div id="docPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('docPane');
+    const canIssue = Store.can('document.write');
+
+    if (this.tab === 'request') {
+      return apiSafe('document.requestList', { mine: !canIssue }, { fallback: [] })
+        .then(function (rows) {
+          pane.innerHTML = UI.card(canIssue ? 'คำขอเอกสาร' : 'คำขอเอกสารของฉัน', UI.table([
+            { label: 'เลขที่', key: 'request_no', width: '110px' },
+            canIssue ? { label: 'ผู้ขอ', render: function (r) {
+                return employeeLink(r.employee_id, empName(r.employees),
+                                    (r.employees || {}).emp_code); } } : null,
+            { label: 'ประเภทเอกสาร', render: function (r) {
+                return Fmt.esc((r.document_templates || {}).name_th || '—'); } },
+            { label: 'วัตถุประสงค์', key: 'purpose' },
+            { label: 'ขอเมื่อ', render: function (r) { return Fmt.date(r.created_at, true); } },
+            { label: 'สถานะ', render: function (r) {
+                return Labels.badge('request_status', r.status); } },
+            { label: '', className: 'right', render: function (r) {
+                return (canIssue && ['PENDING', 'APPROVED'].indexOf(r.status) >= 0)
+                  ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.document.issue(\'' +
+                    r.id + '\')">ออกเอกสาร</button> ' +
+                    '<button class="btn btn-danger-soft btn-sm" onclick="VIEWS.document.reject(\'' +
+                    r.id + '\')">ปฏิเสธ</button>' : ''; } }
+          ].filter(Boolean), rows, { emptyMessage: 'ไม่มีคำขอเอกสาร' }),
+          { tight: true,
+            actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.document.request()">' +
+                     '+ ขอเอกสาร</button>' });
+        });
+    }
+
+    if (this.tab === 'issued') {
+      return apiSafe('document.issuedList', { limit: 100 }, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ทะเบียนเอกสารที่ออก', UI.table([
+          { label: 'เลขที่', key: 'document_no', width: '120px' },
+          { label: 'เรื่อง', key: 'title' },
+          { label: 'ผู้ได้รับ', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'วันที่ออก', render: function (r) { return Fmt.date(r.issue_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              return (r.file_url
+                ? '<a class="btn btn-ghost btn-sm" href="' + Fmt.esc(r.file_url) +
+                  '" target="_blank">เปิดไฟล์</a> ' : '') +
+                (Store.can('document.write') && r.status !== 'REVOKED'
+                  ? '<button class="btn btn-danger-soft btn-sm" onclick="VIEWS.document.revoke(\'' +
+                    r.id + '\')">ยกเลิก</button>' : ''); } }
+        ], rows, { emptyMessage: 'ยังไม่มีเอกสารที่ออก' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'order') {
+      return apiSafe('document.orderList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ทะเบียนคำสั่งบุคคล', UI.table([
+          { label: 'เลขที่', key: 'order_no', width: '120px' },
+          { label: 'วันที่', render: function (r) { return Fmt.date(r.order_date, true); } },
+          { label: 'ประเภท', key: 'order_type' },
+          { label: 'เรื่อง', key: 'subject' },
+          { label: 'มีผลวันที่', render: function (r) { return Fmt.date(r.effective_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status',
+                r.status === 'SIGNED' ? 'APPROVED' : r.status); } }
+        ], rows, { emptyMessage: 'ยังไม่มีคำสั่ง' }), { tight: true });
+      });
+    }
+  },
+
+  request: function () {
+    apiSafe('document.templateList', { selfServiceOnly: !Store.can('document.write') },
+            { fallback: [] }).then(function (tpls) {
+      if (!tpls.length) return Toast.warn('ยังไม่มีแม่แบบเอกสารที่ขอได้');
+      const fields = [
+        { key: 'template_id', label: 'ประเภทเอกสาร', type: 'select', required: true,
+          options: tpls.map(function (t) { return { value: t.id, label: t.name_th }; }) },
+        { key: 'purpose', label: 'วัตถุประสงค์การใช้', required: true, full: true,
+          placeholder: 'เช่น ยื่นขอสินเชื่อธนาคาร / สมัครเรียนต่อ' },
+        { key: 'copies', label: 'จำนวนฉบับ', type: 'number' },
+        { key: 'language', label: 'ภาษา', type: 'select', options: [
+            { value: 'TH', label: 'ไทย' }, { value: 'EN', label: 'อังกฤษ' }] }
+      ];
+      Modal.open({
+        title: 'ขอเอกสาร/หนังสือรับรอง',
+        body: Form.html(fields, { copies: 1, language: 'TH' }),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'ส่งคำขอ', kind: 'btn-primary', onClick: function (body) {
+              return api('document.request', Form.read(body, fields)).then(function (out) {
+                Toast.ok('ส่งคำขอเลขที่ ' + (out.request_no || '') + ' แล้ว');
+                VIEWS.document.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  },
+
+  issue: function (requestId) {
+    Modal.confirm('ออกเอกสารตามคำขอนี้ ระบบจะรวมข้อมูลบุคลากรและสร้างไฟล์ให้อัตโนมัติ')
+      .then(function (yes) {
+        if (!yes) return;
+        apiSafe('document.issue', { request_id: requestId }).then(function (out) {
+          if (!out) return;
+          Toast.ok('ออกเอกสารเลขที่ ' + out.document_no + ' แล้ว');
+          if (out.file_url) window.open(out.file_url, '_blank');
+          VIEWS.document.paintPane();
+        });
+      });
+  },
+
+  reject: function (requestId) {
+    Modal.prompt('ปฏิเสธคำขอเอกสาร', 'เหตุผล', { required: true }).then(function (reason) {
+      if (!reason) return;
+      apiSafe('document.requestReject', { request_id: requestId, reason: reason })
+        .then(function (out) {
+          if (!out) return;
+          Toast.ok('บันทึกแล้ว');
+          VIEWS.document.paintPane();
+        });
+    });
+  },
+
+  revoke: function (id) {
+    Modal.prompt('ยกเลิกเอกสาร', 'เหตุผลการยกเลิก', { required: true }).then(function (reason) {
+      if (!reason) return;
+      apiSafe('document.revoke', { id: id, reason: reason }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ยกเลิกเอกสารแล้ว');
+        VIEWS.document.paintPane();
+      });
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.discipline = {
+  render: function (host) {
+    return apiSafe('discipline.list', {}, { fallback: [] }).then(function (rows) {
+      host.innerHTML =
+        '<div class="card mb-2" style="border-left:4px solid var(--rose-600)">' +
+        '<div class="card-body"><strong>ข้อมูลชั้นความลับ</strong>' +
+        '<div class="small muted mt-1">ทุกการเปิดดูข้อมูลในหน้านี้ถูกบันทึกไว้ใน ' +
+        'บันทึกการเข้าถึงข้อมูลส่วนบุคคล (PDPA) พร้อมชื่อผู้เข้าดูและเวลา</div></div></div>' +
+        UI.card('เรื่องทางวินัย', UI.table([
+          { label: 'เลขที่', key: 'case_no', width: '110px' },
+          { label: 'บุคลากร', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'ประเภท', render: function (r) {
+              const map = { MINOR: ['ไม่ร้ายแรง', 'amber'], SERIOUS: ['ร้ายแรง', 'rose'],
+                            CRIMINAL: ['อาญา', 'rose'], ETHICS: ['จริยธรรม', 'violet'],
+                            ATTENDANCE: ['การมาปฏิบัติงาน', 'blue'],
+                            PERFORMANCE: ['ผลการปฏิบัติงาน', 'blue'] };
+              const m = map[r.case_type] || ['—', 'slate'];
+              return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>'; } },
+          { label: 'วันที่รายงาน', render: function (r) { return Fmt.date(r.reported_date, true); } },
+          { label: 'เรื่อง', render: function (r) {
+              return '<span class="truncate" style="max-width:280px;display:inline-block">' +
+                     Fmt.esc(r.description || '') + '</span>'; } },
+          { label: 'สถานะ', render: function (r) {
+              return '<span class="badge badge-slate">' + Fmt.esc(r.status) + '</span>'; } },
+          { label: '', className: 'right', render: function (r) {
+              return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.discipline.open(\'' +
+                     r.id + '\')">ดู</button>'; } }
+        ], rows, { emptyMessage: 'ไม่มีเรื่องทางวินัย' }),
+        { tight: true,
+          actions: Store.can('discipline.write')
+            ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.discipline.create()">' +
+              '+ บันทึกเรื่อง</button>' : '' });
+    });
+  },
+
+  open: function (id) {
+    Modal.open({ title: 'รายละเอียดเรื่องทางวินัย', size: 'wide', body: UI.loading(4) });
+    apiSafe('discipline.get', { id: id }).then(function (c) {
+      const body = document.querySelector('.modal-scrim:last-child .modal-body');
+      if (!body || !c) return;
+      body.innerHTML = UI.defList([
+        ['เลขที่เรื่อง', Fmt.esc(c.case_no || '—')],
+        ['บุคลากร', Fmt.esc(empName(c.employees))],
+        ['ประเภท', Fmt.esc(c.case_type)],
+        ['วันที่เกิดเหตุ', Fmt.date(c.incident_date)],
+        ['วันที่รายงาน', Fmt.date(c.reported_date)],
+        ['สถานะ', Fmt.esc(c.status)]
+      ]) +
+      '<div class="mt-3"><div class="field-label">รายละเอียด</div>' +
+      '<p style="line-height:1.7;white-space:pre-line">' + Fmt.esc(c.description || '—') + '</p></div>' +
+      (c.finding ? '<div class="mt-2"><div class="field-label">ผลการสอบสวน</div>' +
+        '<p style="line-height:1.7;white-space:pre-line">' + Fmt.esc(c.finding) + '</p></div>' : '') +
+      '<h3 class="mt-3 mb-1" style="font-size:14px">การดำเนินการทางวินัย</h3>' +
+      UI.table([
+        { label: 'วันที่', render: function (a) { return Fmt.date(a.action_date, true); } },
+        { label: 'โทษ', key: 'action_type' },
+        { label: 'มีผล', render: function (a) {
+            return a.effective_from ? Fmt.date(a.effective_from, true) : '—'; } },
+        { label: 'คำสั่งเลขที่', key: 'order_no' }
+      ], c.actions, { emptyMessage: 'ยังไม่มีการลงโทษ' });
+    });
+  },
+
+  create: function () {
+    const fields = [
+      { key: 'case_type', label: 'ประเภทเรื่อง', type: 'select', required: true, options: [
+          { value: 'MINOR', label: 'วินัยไม่ร้ายแรง' }, { value: 'SERIOUS', label: 'วินัยร้ายแรง' },
+          { value: 'ETHICS', label: 'จริยธรรม' }, { value: 'ATTENDANCE', label: 'การมาปฏิบัติงาน' },
+          { value: 'PERFORMANCE', label: 'ผลการปฏิบัติงาน' }] },
+      { key: 'offense_category', label: 'ลักษณะความผิด' },
+      { key: 'incident_date', label: 'วันที่เกิดเหตุ', type: 'date' },
+      { key: 'reported_date', label: 'วันที่รายงาน', type: 'date' },
+      { key: 'description', label: 'รายละเอียดเรื่อง', type: 'textarea', required: true, full: true }
+    ];
+    Modal.open({
+      title: 'บันทึกเรื่องทางวินัย',
+      size: 'wide',
+      body: employeePicker('discEmployee', 'บุคลากรที่เกี่ยวข้อง') +
+            Form.html(fields, { reported_date: Fmt.today() }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const d = Form.read(body, fields);
+            d.employee_id = body.querySelector('#f_discEmployee').value;
+            if (!d.employee_id) throw new Error('กรุณาเลือกบุคลากร');
+            return api('discipline.save', d).then(function () {
+              Toast.ok('บันทึกเรื่องแล้ว');
+              Shell.reload();
+            });
+          } }
+      ]
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.offboarding = {
+  tab: 'list',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [
+      { id: 'list', label: 'คำขอพ้นสภาพ' },
+      { id: 'retire', label: 'ผู้ครบเกษียณ' },
+      { id: 'analysis', label: 'วิเคราะห์การลาออก' }
+    ];
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.offboarding.setTab') +
+                          '<div id="offPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('offPane');
+
+    if (this.tab === 'list') {
+      return apiSafe('offboarding.list', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('คำขอพ้นสภาพ', UI.table([
+          { label: 'เลขที่', key: 'request_no', width: '110px' },
+          { label: 'บุคลากร', render: function (r) {
+              return employeeLink(r.employee_id, empName(r.employees),
+                                  (r.employees || {}).emp_code); } },
+          { label: 'ประเภท', render: function (r) {
+              const map = { RESIGN: 'ลาออก', RETIRE: 'เกษียณอายุ', EARLY_RETIRE: 'เกษียณก่อนกำหนด',
+                            CONTRACT_END: 'สิ้นสุดสัญญา', TRANSFER_OUT: 'โอนย้ายออก',
+                            TERMINATE: 'ให้ออก', DISMISS: 'ไล่ออก', DECEASE: 'เสียชีวิต' };
+              return Fmt.esc(map[r.separation_type] || r.separation_type); } },
+          { label: 'วันสุดท้าย', render: function (r) {
+              return Fmt.date(r.last_working_date, true); } },
+          { label: 'พ้นสภาพ', render: function (r) { return Fmt.date(r.effective_date, true); } },
+          { label: 'สถานะ', render: function (r) {
+              return Labels.badge('request_status', r.status); } },
+          { label: '', className: 'right', render: function (r) {
+              let b = '<button class="btn btn-ghost btn-sm" onclick="VIEWS.offboarding.open(\'' +
+                      r.id + '\')">ดู</button> ';
+              if (r.status === 'PENDING' && Store.can('offboarding.approve')) {
+                b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.offboarding.act(\'' +
+                     r.id + '\',\'APPROVE\')">อนุมัติ</button>';
+              }
+              if (r.status === 'APPROVED' && Store.can('offboarding.approve')) {
+                b += '<button class="btn btn-primary btn-sm" onclick="VIEWS.offboarding.complete(\'' +
+                     r.id + '\')">ดำเนินการพ้นสภาพ</button>';
+              }
+              return b; } }
+        ], rows, { emptyMessage: 'ไม่มีคำขอพ้นสภาพ' }),
+        { tight: true,
+          actions: '<button class="btn btn-primary btn-sm" onclick="VIEWS.offboarding.request()">' +
+                   '+ ยื่นคำขอ</button>' });
+      });
+    }
+
+    if (this.tab === 'retire') {
+      return apiSafe('offboarding.upcomingRetirements', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ผู้ครบเกษียณอายุราชการใน 12 เดือนข้างหน้า', UI.table([
+          { label: 'รหัส', key: 'emp_code', width: '90px' },
+          { label: 'ชื่อ-สกุล', render: function (r) {
+              return employeeLink(r.employee_id, r.full_name_th); } },
+          { label: 'ตำแหน่ง', key: 'position_name' },
+          { label: 'สังกัด', key: 'department_name' },
+          { label: 'วันเกิด', render: function (r) { return Fmt.date(r.birth_date, true); } },
+          { label: 'วันเกษียณ', render: function (r) {
+              return '<strong>' + Fmt.date(r.retirement_date, true) + '</strong>'; } },
+          { label: 'เหลืออีก', className: 'num', render: function (r) {
+              return Fmt.num(r.days_remaining) + ' วัน'; } },
+          { label: 'อายุราชการ', key: 'service_length_text' }
+        ], rows, { emptyMessage: 'ไม่มีผู้ครบเกษียณในช่วงนี้' }), { tight: true });
+      });
+    }
+
+    if (this.tab === 'analysis') {
+      return apiSafe('offboarding.exitAnalysis', {}, { fallback: null }).then(function (d) {
+        if (!d) return;
+        const typeItems = Object.keys(d.byType || {}).map(function (k) {
+          return { label: k, value: d.byType[k] };
+        });
+        pane.innerHTML =
+          '<div class="grid grid-2 mb-2">' +
+          UI.card('การพ้นสภาพปีงบประมาณ ' + d.fiscalYear + ' (รวม ' + d.total + ' คน)',
+            typeItems.length ? UI.bars(typeItems) : UI.empty('ไม่มีข้อมูล')) +
+          UI.card('อัตราการเข้า-ออกย้อนหลัง', UI.table([
+            { label: 'ปีงบประมาณ', key: 'fiscal_year', className: 'num' },
+            { label: 'กำลังคน', key: 'headcount', className: 'num' },
+            { label: 'เข้าใหม่', key: 'hire_count', className: 'num' },
+            { label: 'พ้นสภาพ', key: 'separation_count', className: 'num' },
+            { label: 'อัตราออก', className: 'num', render: function (r) {
+                return Fmt.percent(r.turnover_percent, 2); } }
+          ], d.turnover, { emptyMessage: 'ไม่มีข้อมูล' }), { tight: true }) +
+          '</div>';
+      });
+    }
+  },
+
+  request: function () {
+    const fields = [
+      { key: 'separation_type', label: 'ประเภทการพ้นสภาพ', type: 'select', required: true, options: [
+          { value: 'RESIGN', label: 'ลาออก' }, { value: 'RETIRE', label: 'เกษียณอายุ' },
+          { value: 'EARLY_RETIRE', label: 'เกษียณก่อนกำหนด' },
+          { value: 'CONTRACT_END', label: 'สิ้นสุดสัญญาจ้าง' },
+          { value: 'TRANSFER_OUT', label: 'โอนย้ายออก' }] },
+      { key: 'last_working_date', label: 'วันทำงานวันสุดท้าย', type: 'date', required: true },
+      { key: 'effective_date', label: 'วันพ้นสภาพ', type: 'date', required: true },
+      { key: 'reason_category', label: 'หมวดเหตุผล', type: 'select', options: [
+          { value: 'PERSONAL', label: 'เหตุผลส่วนตัว' },
+          { value: 'CAREER', label: 'ความก้าวหน้าในอาชีพ' },
+          { value: 'COMPENSATION', label: 'ค่าตอบแทน' },
+          { value: 'FAMILY', label: 'ครอบครัว' },
+          { value: 'HEALTH', label: 'สุขภาพ' },
+          { value: 'RELOCATION', label: 'ย้ายภูมิลำเนา' },
+          { value: 'STUDY', label: 'ศึกษาต่อ' },
+          { value: 'OTHER', label: 'อื่น ๆ' }] },
+      { key: 'new_employer', label: 'หน่วยงานใหม่ (ถ้ามี)' },
+      { key: 'reason_detail', label: 'รายละเอียดเหตุผล', type: 'textarea', full: true }
+    ];
+    Modal.open({
+      title: 'ยื่นคำขอพ้นสภาพ',
+      size: 'wide',
+      body: '<p class="small muted mb-2">ระบบจะสร้างรายการเคลียร์ของและส่งเรื่องให้ ' +
+            'ผู้บังคับบัญชาพิจารณาโดยอัตโนมัติ</p>' +
+            Form.html(fields, {
+              last_working_date: Fmt.addDays(Fmt.today(), 30),
+              effective_date: Fmt.addDays(Fmt.today(), 30)
+            }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'ยื่นคำขอ', kind: 'btn-primary', onClick: function (body) {
+            return api('offboarding.request', Form.read(body, fields)).then(function (out) {
+              Toast.ok('ยื่นคำขอเลขที่ ' + (out.request_no || '') + ' แล้ว');
+              VIEWS.offboarding.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  open: function (id) {
+    Modal.open({ title: 'รายละเอียดการพ้นสภาพ', size: 'wide', body: UI.loading(4) });
+    apiSafe('offboarding.get', { id: id }).then(function (s) {
+      const body = document.querySelector('.modal-scrim:last-child .modal-body');
+      if (!body || !s) return;
+      const pending = (s.clearanceItems || []).filter(function (c) {
+        return ['PENDING', 'OUTSTANDING'].indexOf(c.status) >= 0;
+      }).length;
+
+      body.innerHTML = UI.defList([
+        ['เลขที่คำขอ', Fmt.esc(s.request_no || '—')],
+        ['บุคลากร', Fmt.esc(empName(s.employees))],
+        ['ประเภท', Fmt.esc(s.separation_type)],
+        ['วันทำงานวันสุดท้าย', Fmt.date(s.last_working_date)],
+        ['วันพ้นสภาพ', Fmt.date(s.effective_date)],
+        ['สถานะ', Labels.badge('request_status', s.status)]
+      ]) +
+      '<div class="mt-3"><div class="field-label">เหตุผล</div>' +
+      '<p style="line-height:1.7">' + Fmt.esc(s.reason_detail || '—') + '</p></div>' +
+      '<h3 class="mt-3 mb-1" style="font-size:14px">รายการเคลียร์ก่อนพ้นสภาพ' +
+      (pending ? ' <span class="badge badge-amber">ค้าง ' + pending + ' รายการ</span>' : '') + '</h3>' +
+      UI.table([
+        { label: 'หมวด', key: 'category', width: '110px' },
+        { label: 'รายการ', key: 'item_name' },
+        { label: 'สถานะ', render: function (c) {
+            const map = { PENDING: ['รอเคลียร์', 'amber'], CLEARED: ['เคลียร์แล้ว', 'green'],
+                          OUTSTANDING: ['ค้างชำระ', 'rose'], WAIVED: ['ยกเว้น', 'slate'] };
+            const m = map[c.status] || ['—', 'slate'];
+            return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>'; } },
+        { label: '', className: 'right', render: function (c) {
+            return (Store.can('offboarding.write') && c.status === 'PENDING')
+              ? '<button class="btn btn-secondary btn-sm" ' +
+                'onclick="VIEWS.offboarding.clear(\'' + c.id + '\')">เคลียร์แล้ว</button>' : ''; } }
+      ], s.clearanceItems, { emptyMessage: 'ไม่มีรายการเคลียร์' });
+    });
+  },
+
+  clear: function (itemId) {
+    apiSafe('offboarding.clearanceUpdate', { id: itemId, status: 'CLEARED' }).then(function (out) {
+      if (!out) return;
+      Toast.ok('บันทึกแล้ว');
+      Modal.close();
+    });
+  },
+
+  act: function (id, action) {
+    if (action === 'APPROVE') {
+      return Modal.confirm('อนุมัติคำขอพ้นสภาพนี้').then(function (yes) {
+        if (!yes) return;
+        apiSafe('offboarding.act', { id: id, action: 'APPROVE' }).then(function (out) {
+          if (!out) return;
+          Toast.ok('อนุมัติแล้ว');
+          VIEWS.offboarding.paintPane();
+        });
+      });
+    }
+    Modal.prompt('ไม่อนุมัติคำขอ', 'เหตุผล', { required: true }).then(function (reason) {
+      if (!reason) return;
+      apiSafe('offboarding.act', { id: id, action: 'REJECT', reason: reason }).then(function (out) {
+        if (!out) return;
+        Toast.ok('บันทึกแล้ว');
+        VIEWS.offboarding.paintPane();
+      });
+    });
+  },
+
+  complete: function (id) {
+    Modal.confirm('ดำเนินการพ้นสภาพ ระบบจะปิดการดำรงตำแหน่ง ปรับสถานะบุคลากร ' +
+                  'ระงับสิทธิใช้งานระบบ และปิดสิทธิสวัสดิการทั้งหมด — ' +
+                  'การดำเนินการนี้ย้อนกลับไม่ได้',
+                  { danger: true, okLabel: 'ดำเนินการ' }).then(function (yes) {
+      if (!yes) return;
+      apiSafe('offboarding.complete', { id: id }).then(function (out) {
+        if (!out) return;
+        Toast.ok('ดำเนินการพ้นสภาพเรียบร้อย');
+        VIEWS.offboarding.paintPane();
+      });
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.report = {
+  render: function (host) {
+    this.host = host;
+    return api('report.catalog').then(function (list) {
+      VIEWS.report.catalog = list;
+      host.innerHTML =
+        '<div class="grid grid-3 mb-2">' + list.map(function (r) {
+          return '<button class="card" style="text-align:left;border:1px solid var(--line);' +
+            'cursor:pointer;padding:0" onclick="VIEWS.report.run(\'' + r.code + '\')">' +
+            '<div class="card-body">' +
+            '<strong style="font-size:14px">' + Fmt.esc(r.name) + '</strong>' +
+            '<div class="small muted mt-1">' + r.columns.length + ' คอลัมน์</div>' +
+            '</div></button>';
+        }).join('') + '</div>' +
+        '<div id="reportResult"></div>';
+    });
+  },
+
+  run: function (code) {
+    const host = document.getElementById('reportResult');
+    host.innerHTML = UI.loading(4);
+    apiSafe('report.run', { code: code, params: {} }).then(function (out) {
+      if (!out) return;
+      VIEWS.report.current = out;
+      host.innerHTML = UI.card(out.name, UI.table(
+        out.columns.map(function (c) {
+          return {
+            label: c.label,
+            className: (c.type === 'money' ? 'num' : ''),
+            render: function (r) {
+              const v = r[c.key];
+              if (v === null || v === undefined || v === '') return '—';
+              if (c.type === 'money') return Fmt.money(v);
+              if (c.type === 'date') return Fmt.date(v, true);
+              if (c.type === 'month') return Fmt.month(v);
+              return Fmt.esc(v);
+            }
+          };
+        }), out.rows, { emptyMessage: 'ไม่พบข้อมูลตามเงื่อนไข' }),
+        { tight: true,
+          sub: 'พบ ' + Fmt.num(out.total) + ' รายการ · สร้างเมื่อ ' + Fmt.dateTime(out.generatedAt),
+          actions: Store.can('report.export')
+            ? '<button class="btn btn-ghost btn-sm" onclick="VIEWS.report.exportCsv(\'' +
+              code + '\')">CSV</button> ' +
+              '<button class="btn btn-secondary btn-sm" onclick="VIEWS.report.exportSheet(\'' +
+              code + '\')">Google Sheets</button> ' +
+              '<button class="btn btn-ghost btn-sm" onclick="window.print()">พิมพ์</button>'
+            : '' });
+      host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  },
+
+  exportCsv: function (code) {
+    apiSafe('report.exportCsv', { code: code, params: {} }).then(function (out) {
+      if (!out) return;
+      UI.download(out.filename, out.csv);
+      Toast.ok('ส่งออก ' + Fmt.num(out.rows) + ' รายการแล้ว');
+    });
+  },
+
+  exportSheet: function (code) {
+    Toast.show('กำลังสร้าง Google Sheets…', 'warn', 'โปรดรอ');
+    apiSafe('report.exportSheet', { code: code, params: {} }).then(function (out) {
+      if (!out) return;
+      Toast.ok('สร้างไฟล์แล้ว ' + Fmt.num(out.rows) + ' รายการ');
+      window.open(out.url, '_blank');
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.audit = {
+  tab: 'change',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [
+      { id: 'change', label: 'การเปลี่ยนแปลงข้อมูล' },
+      { id: 'access', label: 'การเข้าถึงข้อมูลส่วนบุคคล' },
+      { id: 'login', label: 'การเข้าสู่ระบบ' }
+    ];
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.audit.setTab') +
+                          '<div id="auditPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('auditPane');
+
+    if (this.tab === 'change') {
+      return apiSafe('audit.list', { limit: 100 }, { fallback: { rows: [], total: 0 } })
+        .then(function (res) {
+          pane.innerHTML = UI.card('บันทึกการเปลี่ยนแปลงข้อมูล', UI.table([
+            { label: 'เมื่อ', render: function (r) { return Fmt.dateTime(r.occurred_at); } },
+            { label: 'ตาราง', render: function (r) {
+                return '<span class="mono small">' + Fmt.esc(r.table_name) + '</span>'; } },
+            { label: 'การกระทำ', render: function (r) {
+                const map = { INSERT: ['เพิ่ม', 'green'], UPDATE: ['แก้ไข', 'blue'],
+                              DELETE: ['ลบ', 'rose'] };
+                const m = map[r.action] || ['—', 'slate'];
+                return '<span class="badge badge-' + m[1] + '">' + m[0] + '</span>'; } },
+            { label: 'ผู้ดำเนินการ', key: 'actor_email' },
+            { label: 'ฟิลด์ที่เปลี่ยน', render: function (r) {
+                const f = r.changed_fields || [];
+                return f.length
+                  ? f.slice(0, 4).map(function (x) {
+                      return '<span class="badge badge-slate">' + Fmt.esc(x) + '</span>'; }).join(' ') +
+                    (f.length > 4 ? ' <span class="muted small">+' + (f.length - 4) + '</span>' : '')
+                  : '—'; } },
+            { label: '', className: 'right', render: function (r) {
+                return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.audit.detail(' +
+                       r.id + ')">ดู</button>'; } }
+          ], res.rows, { emptyMessage: 'ไม่มีบันทึก' }),
+          { tight: true, sub: 'ทั้งหมด ' + Fmt.num(res.total) + ' รายการ' });
+        });
+    }
+
+    if (this.tab === 'access') {
+      return apiSafe('audit.accessLog', { limit: 100 }, { fallback: { rows: [] } })
+        .then(function (res) {
+          pane.innerHTML = UI.card('บันทึกการเข้าถึงข้อมูลส่วนบุคคล (PDPA)', UI.table([
+            { label: 'เมื่อ', render: function (r) { return Fmt.dateTime(r.occurred_at); } },
+            { label: 'ผู้เข้าถึง', key: 'actor_email' },
+            { label: 'โมดูล', key: 'module' },
+            { label: 'การกระทำ', key: 'action' },
+            { label: 'วัตถุประสงค์', key: 'purpose' }
+          ], res.rows, { emptyMessage: 'ไม่มีบันทึก' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'login') {
+      return apiSafe('audit.loginLog', { limit: 100 }, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('บันทึกการเข้าสู่ระบบ', UI.table([
+          { label: 'เมื่อ', render: function (r) { return Fmt.dateTime(r.occurred_at); } },
+          { label: 'อีเมล', key: 'email' },
+          { label: 'ผลลัพธ์', render: function (r) {
+              return r.result === 'SUCCESS'
+                ? '<span class="badge badge-green">สำเร็จ</span>'
+                : '<span class="badge badge-rose">' + Fmt.esc(r.result) + '</span>'; } },
+          { label: 'ช่องทาง', key: 'method' }
+        ], rows, { emptyMessage: 'ไม่มีบันทึก' }), { tight: true });
+      });
+    }
+  },
+
+  detail: function (id) {
+    Modal.open({ title: 'รายละเอียดการเปลี่ยนแปลง', size: 'wide', body: UI.loading(4) });
+    apiSafe('audit.detail', { id: id }).then(function (r) {
+      const body = document.querySelector('.modal-scrim:last-child .modal-body');
+      if (!body || !r) return;
+      const fields = r.changed_fields || [];
+      body.innerHTML = UI.defList([
+        ['ตาราง', '<span class="mono">' + Fmt.esc(r.table_name) + '</span>'],
+        ['ระเบียน', '<span class="mono small">' + Fmt.esc(r.record_id) + '</span>'],
+        ['การกระทำ', Fmt.esc(r.action)],
+        ['ผู้ดำเนินการ', Fmt.esc(r.actor_email || '—')],
+        ['เมื่อ', Fmt.dateTime(r.occurred_at)]
+      ]) +
+      (r.action === 'UPDATE' && fields.length
+        ? '<h3 class="mt-3 mb-1" style="font-size:14px">ค่าที่เปลี่ยนแปลง</h3>' +
+          '<div class="table-wrap"><table><thead><tr><th>ฟิลด์</th><th>ค่าเดิม</th>' +
+          '<th>ค่าใหม่</th></tr></thead><tbody>' +
+          fields.map(function (f) {
+            const o = (r.old_data || {})[f];
+            const n = (r.new_data || {})[f];
+            return '<tr><td class="mono small">' + Fmt.esc(f) + '</td>' +
+              '<td class="small" style="color:var(--rose-600)">' +
+              Fmt.esc(o === null || o === undefined ? '—' : JSON.stringify(o)) + '</td>' +
+              '<td class="small" style="color:var(--moss-600)">' +
+              Fmt.esc(n === null || n === undefined ? '—' : JSON.stringify(n)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<pre class="small mt-3" style="background:#f1efe6;padding:12px;border-radius:8px;' +
+          'overflow:auto">' + Fmt.esc(JSON.stringify(r.new_data || r.old_data, null, 2)) + '</pre>');
+    });
+  }
+};
+
+/* ========================================================================== */
+
+VIEWS.admin = {
+  tab: 'user',
+
+  render: function (host) {
+    this.host = host;
+    this.paint();
+    return Promise.resolve();
+  },
+
+  paint: function () {
+    const tabs = [
+      { id: 'user', label: 'ผู้ใช้ระบบ' },
+      { id: 'role', label: 'บทบาทและสิทธิ' },
+      { id: 'flow', label: 'สายอนุมัติ' },
+      { id: 'health', label: 'ตรวจสอบระบบ' }
+    ];
+    this.host.innerHTML = UI.tabs(tabs, this.tab, 'VIEWS.admin.setTab') +
+                          '<div id="admPane">' + UI.loading(3) + '</div>';
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('admPane');
+
+    if (this.tab === 'user') {
+      return apiSafe('admin.userList', {}, { fallback: [] }).then(function (rows) {
+        pane.innerHTML = UI.card('ผู้ใช้ระบบ', UI.table([
+          { label: 'ผู้ใช้', render: function (u) {
+              return '<strong>' + Fmt.esc(u.display_name) + '</strong>' +
+                '<div class="small muted">' + Fmt.esc(u.email) + '</div>'; } },
+          { label: 'ผูกกับบุคลากร', render: function (u) {
+              const e = u.employees;
+              return e ? employeeLink(u.employee_id,
+                [e.first_name_th, e.last_name_th].filter(Boolean).join(' '), e.emp_code)
+                : '<span class="muted small">ยังไม่ผูก</span>'; } },
+          { label: 'บทบาท', render: function (u) {
+              return (u.roles || []).map(function (r) {
+                return '<span class="badge badge-blue">' +
+                       Fmt.esc((r.roles || {}).name_th || '') + '</span>';
+              }).join(' ') || '—'; } },
+          { label: 'เข้าใช้ล่าสุด', render: function (u) {
+              return u.last_login_at ? Fmt.ago(u.last_login_at) : 'ยังไม่เคย'; } },
+          { label: 'สถานะ', render: function (u) {
+              return u.status === 'ACTIVE'
+                ? '<span class="badge badge-green">ใช้งาน</span>'
+                : '<span class="badge badge-rose">' + Fmt.esc(u.status) + '</span>'; } },
+          { label: '', className: 'right', render: function (u) {
+              return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.admin.assignRole(\'' +
+                     u.id + '\')">กำหนดสิทธิ</button>'; } }
+        ], rows, { emptyMessage: 'ยังไม่มีผู้ใช้' }),
+        { tight: true,
+          actions: '<button class="btn btn-secondary btn-sm" onclick="VIEWS.admin.bulkCreate()">' +
+                   'สร้างจากทะเบียนบุคลากร</button> ' +
+                   '<button class="btn btn-primary btn-sm" onclick="VIEWS.admin.editUser()">' +
+                   '+ ผู้ใช้ใหม่</button>' });
+      });
+    }
+
+    if (this.tab === 'role') {
+      return apiSafe('admin.roleList', {}, { fallback: { roles: [], permissions: [] } })
+        .then(function (d) {
+          VIEWS.admin.roleData = d;
+          pane.innerHTML = UI.card('บทบาทและสิทธิ', UI.table([
+            { label: 'รหัส', key: 'code', width: '140px' },
+            { label: 'ชื่อบทบาท', key: 'name_th' },
+            { label: 'ประเภท', render: function (r) {
+                return r.is_system ? '<span class="badge badge-slate">บทบาทระบบ</span>'
+                                   : '<span class="badge badge-blue">กำหนดเอง</span>'; } },
+            { label: 'จำนวนสิทธิ', className: 'num', render: function (r) {
+                return (r.permissions || []).indexOf('*') >= 0
+                  ? 'ทั้งหมด' : (r.permissions || []).length; } },
+            { label: 'คำอธิบาย', key: 'description' }
+          ], d.roles, { emptyMessage: 'ไม่มีบทบาท' }), { tight: true });
+        });
+    }
+
+    if (this.tab === 'flow') {
+      return apiSafe('admin.approvalFlowList', {}, { fallback: [] }).then(function (flows) {
+        pane.innerHTML = flows.length
+          ? flows.map(function (f) {
+              return UI.card(f.name_th,
+                UI.table([
+                  { label: 'ขั้นที่', key: 'step_no', className: 'num', width: '70px' },
+                  { label: 'ชื่อขั้น', key: 'name_th' },
+                  { label: 'ผู้อนุมัติ', render: function (s) {
+                      const map = { SUPERVISOR: 'ผู้บังคับบัญชาชั้นต้น', DEPT_HEAD: 'หัวหน้าหน่วยงาน',
+                                    FACILITY_HEAD: 'ผู้อำนวยการสถานบริการ', HR: 'งานบุคคล',
+                                    ROLE: 'ตามบทบาท', USER: 'ผู้ใช้ที่ระบุ' };
+                      return Fmt.esc(map[s.approver_type] || s.approver_type); } },
+                  { label: 'ขั้นสุดท้าย', render: function (s) {
+                      return s.is_final ? '<span class="badge badge-green">ใช่</span>' : '—'; } },
+                  { label: 'SLA', className: 'num', render: function (s) {
+                      return s.sla_hours ? s.sla_hours + ' ชม.' : '—'; } }
+                ], f.steps, { emptyMessage: 'ยังไม่ได้กำหนดขั้นตอน' }),
+                { tight: true, sub: 'ใช้กับ ' + f.entity_type + ' · รหัส ' + f.code });
+            }).join('<div style="height:16px"></div>')
+          : UI.empty('ยังไม่ได้ตั้งค่าสายอนุมัติ');
+      });
+    }
+
+    if (this.tab === 'health') {
+      return apiSafe('admin.healthCheck', {}, { fallback: null }).then(function (d) {
+        if (!d) return;
+        pane.innerHTML = UI.card('ผลการตรวจสอบระบบ',
+          '<div class="col gap-2">' + d.checks.map(function (c) {
+            return '<div class="row gap-2" style="padding:10px 12px;border:1px solid var(--line);' +
+              'border-radius:8px;border-left:3px solid ' +
+              (c.ok ? 'var(--moss-500)' : 'var(--rose-600)') + '">' +
+              '<span style="font-size:15px">' + (c.ok ? '✓' : '✕') + '</span>' +
+              '<div class="grow"><strong style="font-size:13.5px">' + Fmt.esc(c.name) + '</strong>' +
+              '<div class="small muted">' + Fmt.esc(c.detail) + '</div></div></div>';
+          }).join('') + '</div>',
+          { sub: d.allOk ? 'ระบบพร้อมใช้งาน' : 'พบรายการที่ต้องแก้ไข' });
+      });
+    }
+  },
+
+  editUser: function () {
+    const fields = [
+      { key: 'email', label: 'อีเมล', type: 'email', required: true },
+      { key: 'google_email', label: 'บัญชี Google ที่ใช้เข้าระบบ', type: 'email',
+        hint: 'เว้นว่างหากใช้อีเมลเดียวกัน' },
+      { key: 'display_name', label: 'ชื่อที่แสดง', required: true },
+      { key: 'status', label: 'สถานะ', type: 'select', options: [
+          { value: 'ACTIVE', label: 'ใช้งาน' }, { value: 'SUSPENDED', label: 'ระงับชั่วคราว' },
+          { value: 'DISABLED', label: 'ปิดการใช้งาน' }] }
+    ];
+    Modal.open({
+      title: 'เพิ่มผู้ใช้ระบบ',
+      body: employeePicker('userEmployee', 'ผูกกับบุคลากร (ไม่บังคับ)') +
+            Form.html(fields, { status: 'ACTIVE' }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const d = Form.read(body, fields);
+            const empId = body.querySelector('#f_userEmployee').value;
+            if (empId) d.employee_id = empId;
+            if (!d.google_email) d.google_email = d.email;
+            return api('admin.userSave', d).then(function () {
+              Toast.ok('เพิ่มผู้ใช้แล้ว');
+              VIEWS.admin.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  bulkCreate: function () {
+    Modal.open({
+      title: 'สร้างบัญชีผู้ใช้จากทะเบียนบุคลากร',
+      body: '<p class="small muted">ระบบจะสร้างบัญชีให้บุคลากรที่ยังไม่มีบัญชีและมีอีเมล ' +
+            'พร้อมกำหนดบทบาท "บุคลากร" ให้อัตโนมัติ</p>' +
+            '<div class="field-group mt-2"><label class="field-label">' +
+            'รหัสบุคลากร (คั่นด้วยจุลภาค) หรือเว้นว่างเพื่อเลือกจากรายการ</label>' +
+            '<textarea class="field" id="bulkIds" placeholder="EMP0001, EMP0002"></textarea></div>',
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'สร้างบัญชี', kind: 'btn-primary', onClick: function (body) {
+            const codes = body.querySelector('#bulkIds').value.split(',')
+              .map(function (s) { return s.trim(); }).filter(Boolean);
+            if (!codes.length) throw new Error('กรุณาระบุรหัสบุคลากรอย่างน้อย 1 รายการ');
+
+            return api('employee.list', { q: '', limit: 500 }).then(function (res) {
+              const ids = (res.rows || [])
+                .filter(function (e) { return codes.indexOf(e.emp_code) >= 0; })
+                .map(function (e) { return e.employee_id; });
+              if (!ids.length) throw new Error('ไม่พบบุคลากรตามรหัสที่ระบุ');
+              return api('admin.userCreateFromEmployees', { employee_ids: ids });
+            }).then(function (out) {
+              Toast.ok('สร้างบัญชี ' + out.created.length + ' ราย' +
+                       (out.skipped.length ? ' · ข้าม ' + out.skipped.length + ' ราย' : ''));
+              if (out.skipped.length) Toast.warn(out.skipped.slice(0, 3).join(' · '));
+              VIEWS.admin.paintPane();
+            });
+          } }
+      ]
+    });
+  },
+
+  assignRole: function (userId) {
+    const d = this.roleData;
+    const load = d ? Promise.resolve(d) : api('admin.roleList');
+    load.then(function (data) {
+      VIEWS.admin.roleData = data;
+      return Store.options();
+    }).then(function (o) {
+      const data = VIEWS.admin.roleData;
+      const fields = [
+        { key: 'role_id', label: 'บทบาท', type: 'select', required: true,
+          options: data.roles.map(function (r) { return { value: r.id, label: r.name_th }; }) },
+        { key: 'facility_id', label: 'จำกัดเฉพาะสถานบริการ', type: 'select',
+          options: o.facilities.map(function (f) { return { value: f.id, label: f.name_th }; }),
+          hint: 'เว้นว่าง = มีสิทธิทั้งองค์กร' },
+        { key: 'department_id', label: 'จำกัดเฉพาะหน่วยงาน', type: 'select',
+          options: o.departments.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+        { key: 'effective_to', label: 'สิ้นสุดสิทธิวันที่', type: 'date' }
+      ];
+      Modal.open({
+        title: 'กำหนดสิทธิผู้ใช้',
+        body: Form.html(fields, {}),
+        buttons: [
+          { label: 'ยกเลิก' },
+          { label: 'กำหนดสิทธิ', kind: 'btn-primary', onClick: function (body) {
+              const p = Form.read(body, fields);
+              p.user_id = userId;
+              return api('admin.assignRole', p).then(function () {
+                Toast.ok('กำหนดสิทธิแล้ว');
+                VIEWS.admin.paintPane();
+              });
+            } }
+        ]
+      });
+    });
+  }
+};
+</script>

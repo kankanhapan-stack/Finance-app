@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>ตรวจสอบเอกสาร</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+<?!= include('client/Styles') ?>
+<style>
+  .verify-wrap{max-width:520px;margin:60px auto;padding:0 18px;}
+  .verify-mark{width:64px;height:64px;border-radius:99px;display:grid;place-items:center;
+    font-size:30px;margin:0 auto 16px;}
+  .verify-mark.ok{background:#e2f2e7;color:var(--moss-700);}
+  .verify-mark.no{background:var(--rose-100);color:var(--rose-600);}
+</style>
+</head>
+<body>
+<div class="verify-wrap">
+  <div class="card"><div class="card-body" id="result">
+    <div class="loading"><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div>
+  </div></div>
+  <p class="small muted center mt-2" style="text-align:center">
+    หน้านี้ใช้ตรวจสอบความถูกต้องของเอกสารที่ออกโดยระบบบริหารงานบุคคล
+  </p>
+</div>
+
+<?!= include('client/Core') ?>
+<script>
+const CODE = '<?= code ?>';
+
+function show(html) { document.getElementById('result').innerHTML = html; }
+
+if (!CODE) {
+  show('<div class="verify-mark no">?</div>' +
+       '<h2 style="text-align:center;font-size:17px">ไม่ได้ระบุรหัสตรวจสอบ</h2>' +
+       '<p class="muted small" style="text-align:center">กรุณาสแกน QR บนเอกสารอีกครั้ง</p>');
+} else {
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.valid) {
+        const d = r.document;
+        show('<div class="verify-mark ok">✓</div>' +
+          '<h2 style="text-align:center;font-size:17px;margin-bottom:16px">เอกสารถูกต้อง</h2>' +
+          UI.defList([
+            ['เลขที่เอกสาร', Fmt.esc(d.document_no)],
+            ['เรื่อง', Fmt.esc(d.title)],
+            ['ออกให้แก่', Fmt.esc(d.employee_name)],
+            ['วันที่ออก', Fmt.esc(d.issue_date_th)]
+          ]));
+      } else {
+        show('<div class="verify-mark no">✕</div>' +
+          '<h2 style="text-align:center;font-size:17px">ตรวจสอบไม่ผ่าน</h2>' +
+          '<p class="muted small" style="text-align:center;line-height:1.7">' +
+          Fmt.esc((r && r.message) || 'ไม่พบเอกสารที่ตรงกับรหัสนี้') + '</p>');
+      }
+    })
+    .withFailureHandler(function (e) {
+      show('<div class="verify-mark no">✕</div>' +
+        '<h2 style="text-align:center;font-size:17px">เกิดข้อผิดพลาด</h2>' +
+        '<p class="muted small" style="text-align:center">' + Fmt.esc(e.message) + '</p>');
+    })
+    .verifyDocument(CODE);
+}
+</script>
+</body>
+</html>

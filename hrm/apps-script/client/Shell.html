@@ -1,0 +1,225 @@
+<script>
+/* =============================================================================
+   HRM :: Shell.html
+   โครงหน้าจอ: bootstrap, เมนู, เส้นทาง (hash router), การแจ้งเตือน
+   ============================================================================= */
+
+const VIEWS = {};   // โมดูลลงทะเบียนหน้าจอไว้ที่นี่ (ดู ViewsCore/ViewsPeople/...)
+
+const Shell = {
+  current: null,
+
+  /* ------------------------------------------------------------- เริ่มระบบ */
+  start: function () {
+    const msg = document.getElementById('bootMsg');
+
+    api('app.bootstrap')
+      .then(function (boot) {
+        Store.setBoot(boot);
+        Shell.renderChrome(boot);
+        document.getElementById('boot').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+
+        window.addEventListener('hashchange', function () { Shell.route(); });
+        Shell.route();
+        Shell.pollNotifications();
+      })
+      .catch(function (e) {
+        document.getElementById('boot').classList.add('error');
+        msg.innerHTML = Fmt.esc(e.message) +
+          '<br><br><span style="opacity:.7;font-size:13px">' +
+          'หากคิดว่าเป็นความผิดพลาด กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มบัญชีของท่าน</span>';
+      });
+  },
+
+  /* ------------------------------------------------- วาดเมนูและหัวข้อด้านบน */
+  renderChrome: function (boot) {
+    document.getElementById('orgName').textContent = boot.org ? boot.org.name_th : '—';
+    document.getElementById('fiscalChip').textContent = 'ปีงบประมาณ ' + boot.fiscalYear;
+
+    const emp = boot.user.employee;
+    document.getElementById('me').innerHTML =
+      '<strong>' + Fmt.esc(boot.user.displayName) + '</strong>' +
+      '<span>' + Fmt.esc(emp ? (emp.position_name || '') : boot.user.email) + '</span>' +
+      (emp && emp.facility_name ? '<span>' + Fmt.esc(emp.facility_name) + '</span>' : '');
+
+    document.getElementById('nav').innerHTML = boot.modules.map(function (m) {
+      return '<button class="nav-item" data-module="' + m.id + '" ' +
+             'onclick="Shell.go(\'' + m.id + '\')">' +
+             '<span class="nav-no">' + m.no + '</span>' +
+             '<span class="grow truncate">' + Fmt.esc(m.name) + '</span>' +
+             '<span class="nav-badge hidden" data-badge="' + m.id + '"></span></button>';
+    }).join('');
+  },
+
+  /* --------------------------------------------------------------- เส้นทาง */
+  /** hash รูปแบบ  #module/param1/param2 */
+  route: function () {
+    const hash = (location.hash || '').replace(/^#/, '');
+    const parts = hash.split('/').filter(Boolean);
+    const moduleId = parts[0] || (Store.boot.modules[0] || {}).id || 'dashboard';
+    const params = parts.slice(1);
+
+    const mod = Store.boot.modules.filter(function (m) { return m.id === moduleId; })[0];
+    if (!mod) {
+      Toast.warn('ไม่พบเมนู หรือไม่มีสิทธิเข้าถึง');
+      return this.go((Store.boot.modules[0] || {}).id || 'dashboard');
+    }
+
+    document.querySelectorAll('.nav-item').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.module === moduleId);
+    });
+    document.getElementById('pageTitle').textContent = mod.name;
+    document.getElementById('pageSub').textContent = 'โมดูล ' + mod.no;
+    this.toggleNav(false);
+
+    const view = document.getElementById('view');
+    const handler = VIEWS[moduleId];
+    if (!handler) {
+      view.innerHTML = UI.card(mod.name,
+        UI.empty('หน้าจอโมดูลนี้ยังไม่พร้อมใช้งาน'));
+      return;
+    }
+
+    this.current = { moduleId: moduleId, params: params };
+    view.innerHTML = UI.loading(5);
+
+    Promise.resolve()
+      .then(function () { return handler.render(view, params); })
+      .catch(function (e) {
+        view.innerHTML = UI.card('เกิดข้อผิดพลาด',
+          '<p style="line-height:1.7">' + Fmt.esc(e.message) + '</p>' +
+          '<button class="btn btn-secondary mt-2" onclick="Shell.reload()">ลองใหม่</button>');
+      });
+  },
+
+  go: function (moduleId, params) {
+    const path = [moduleId].concat(params || []).join('/');
+    if (location.hash === '#' + path) this.route();
+    else location.hash = path;
+  },
+
+  reload: function () {
+    Store.cache = {};
+    this.route();
+  },
+
+  toggleNav: function (open) {
+    document.getElementById('sidebar').classList.toggle('open', !!open);
+    document.getElementById('scrim').classList.toggle('open', !!open);
+  },
+
+  /* --------------------------------------------------------- การแจ้งเตือน */
+  pollNotifications: function () {
+    function tick() {
+      apiSafe('notification.list', { limit: 20 }, { silent: true, fallback: [] })
+        .then(function (list) {
+          Shell._notifications = list || [];
+          const unread = (list || []).filter(function (n) { return n.status !== 'READ'; });
+          document.getElementById('bellDot').classList.toggle('hidden', unread.length === 0);
+        });
+    }
+    tick();
+    setInterval(tick, 120000);   // ทุก 2 นาที
+  },
+
+  openNotifications: function () {
+    const list = Shell._notifications || [];
+    const body = list.length
+      ? '<div class="col gap-2">' + list.map(function (n) {
+          return '<div class="card" style="box-shadow:none">' +
+            '<div class="card-body" style="padding:12px 14px">' +
+            '<div class="row between gap-2">' +
+            '<strong style="font-size:13.5px">' + Fmt.esc(n.title) + '</strong>' +
+            '<span class="xsmall muted nowrap">' + Fmt.esc(Fmt.ago(n.created_at)) + '</span></div>' +
+            (n.body ? '<div class="small muted mt-1" style="white-space:pre-line">' +
+                      Fmt.esc(n.body) + '</div>' : '') +
+            '</div></div>';
+        }).join('') + '</div>'
+      : UI.empty('ยังไม่มีการแจ้งเตือน');
+
+    Modal.open({
+      title: 'การแจ้งเตือน',
+      body: body,
+      buttons: [
+        { label: 'ทำเครื่องหมายว่าอ่านแล้ว', kind: 'btn-secondary',
+          onClick: function () {
+            const unread = (Shell._notifications || [])
+              .filter(function (n) { return n.status !== 'READ'; });
+            return Promise.all(unread.map(function (n) {
+              return apiSafe('notification.markRead', { id: n.id }, { silent: true });
+            })).then(function () {
+              document.getElementById('bellDot').classList.add('hidden');
+              Shell._notifications.forEach(function (n) { n.status = 'READ'; });
+            });
+          } },
+        { label: 'ปิด' }
+      ]
+    });
+  },
+
+  /** ตัวเลขค้างบนเมนู */
+  setBadge: function (moduleId, count) {
+    const el = document.querySelector('[data-badge="' + moduleId + '"]');
+    if (!el) return;
+    el.textContent = count > 99 ? '99+' : count;
+    el.classList.toggle('hidden', !count);
+  }
+};
+
+/* ------------------------------------------------------ ตัวช่วยที่ใช้ร่วมกัน */
+
+/** ปุ่มลัดไปหน้ารายละเอียดบุคลากร */
+function employeeLink(id, name, code) {
+  if (!Store.can('employee.read')) return Fmt.esc(name || '—');
+  return '<a href="#employee/' + id + '" style="text-decoration:none">' +
+         '<strong>' + Fmt.esc(name || '—') + '</strong>' +
+         (code ? '<span class="muted small"> · ' + Fmt.esc(code) + '</span>' : '') + '</a>';
+}
+
+/** ชื่อบุคลากรจาก embedded relation ของ PostgREST */
+function empName(rel) {
+  if (!rel) return '—';
+  return [rel.title_th, rel.first_name_th, rel.last_name_th].filter(Boolean).join(' ').trim() || '—';
+}
+
+/** เลือกบุคลากรแบบค้นหา */
+function employeePicker(fieldId, placeholder) {
+  return '<div class="field-group full">' +
+    '<label class="field-label">' + Fmt.esc(placeholder || 'บุคลากร') + '</label>' +
+    '<input class="field" id="' + fieldId + '_q" placeholder="พิมพ์รหัสหรือชื่อเพื่อค้นหา" ' +
+    'oninput="lookupEmployee(\'' + fieldId + '\', this.value)" autocomplete="off">' +
+    '<input type="hidden" id="f_' + fieldId + '">' +
+    '<div id="' + fieldId + '_results" class="mt-1"></div></div>';
+}
+
+let _lookupTimer = null;
+function lookupEmployee(fieldId, q) {
+  clearTimeout(_lookupTimer);
+  const host = document.getElementById(fieldId + '_results');
+  if (!q || q.length < 2) { host.innerHTML = ''; return; }
+
+  _lookupTimer = setTimeout(function () {
+    apiSafe('employee.lookup', { q: q, limit: 8 }, { silent: true, fallback: [] })
+      .then(function (rows) {
+        host.innerHTML = (rows || []).length
+          ? '<div class="card" style="box-shadow:none"><div class="card-body tight">' +
+            rows.map(function (r) {
+              return '<button type="button" class="nav-item" style="color:var(--ink);width:100%" ' +
+                'onclick="pickEmployee(\'' + fieldId + '\',\'' + r.employee_id + '\',\'' +
+                Fmt.esc(r.full_name_th).replace(/'/g, "\\'") + '\')">' +
+                '<span class="grow truncate">' + Fmt.esc(r.full_name_th) +
+                ' <span class="muted small">' + Fmt.esc(r.emp_code) + '</span></span></button>';
+            }).join('') + '</div></div>'
+          : '<div class="small muted">ไม่พบบุคลากรที่ตรงกับคำค้น</div>';
+      });
+  }, 280);
+}
+
+function pickEmployee(fieldId, id, name) {
+  document.getElementById('f_' + fieldId).value = id;
+  document.getElementById(fieldId + '_q').value = name;
+  document.getElementById(fieldId + '_results').innerHTML =
+    '<div class="small" style="color:var(--moss-600)">เลือกแล้ว: ' + Fmt.esc(name) + '</div>';
+}
+</script>

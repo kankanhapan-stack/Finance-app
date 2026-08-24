@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>ประกาศรับสมัครงาน</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+<?!= include('client/Styles') ?>
+<style>
+  .public-wrap{max-width:960px;margin:0 auto;padding:0 18px 60px;}
+  .public-hero{background:linear-gradient(140deg,var(--moss-900),var(--moss-700) 60%,var(--teal-500));
+    color:#fff;padding:44px 18px;margin-bottom:26px;}
+  .public-hero h1{font-size:26px;margin-bottom:6px;}
+  .public-hero p{opacity:.85;margin:0;}
+  .job{display:block;width:100%;text-align:left;background:var(--paper-raised);
+    border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:14px;
+    box-shadow:var(--shadow-sm);cursor:pointer;transition:box-shadow .15s,transform .15s;}
+  .job:hover{box-shadow:var(--shadow-md);transform:translateY(-1px);}
+  .job h2{font-size:17px;margin-bottom:4px;}
+</style>
+</head>
+<body>
+
+<header class="public-hero">
+  <div class="public-wrap" style="padding-bottom:0">
+    <h1>ประกาศรับสมัครบุคลากร</h1>
+    <p>ตำแหน่งที่เปิดรับสมัครในขณะนี้ — คลิกเพื่อดูรายละเอียดและยื่นใบสมัครออนไลน์</p>
+  </div>
+</header>
+
+<main class="public-wrap">
+  <div id="jobList"><div class="loading"><div class="skeleton"></div>
+    <div class="skeleton" style="width:80%"></div>
+    <div class="skeleton" style="width:60%"></div></div></div>
+</main>
+
+<div id="toasts" class="toasts"></div>
+<div id="modalHost"></div>
+
+<?!= include('client/Core') ?>
+<script>
+/* หน้านี้เปิดได้โดยไม่ต้องล็อกอิน จึงเรียกเฉพาะ API สาธารณะ */
+
+function publicApi(action, payload) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.ok) resolve(res.data);
+        else reject(new Error((res && res.error) || 'ไม่สามารถเรียกข้อมูลได้'));
+      })
+      .withFailureHandler(function (e) { reject(new Error(e.message || String(e))); })
+      .publicApi(action, payload || {});
+  });
+}
+
+function loadJobs() {
+  publicApi('jobs.list').then(function (jobs) {
+    const host = document.getElementById('jobList');
+    if (!jobs || !jobs.length) {
+      host.innerHTML = UI.empty('ขณะนี้ยังไม่มีตำแหน่งที่เปิดรับสมัคร');
+      return;
+    }
+    host.innerHTML = jobs.map(function (j) {
+      const daysLeft = Math.ceil((new Date(j.close_date) - Date.now()) / 86400000);
+      return '<button class="job" onclick="openJob(\'' + j.id + '\')">' +
+        '<h2>' + Fmt.esc(j.title) + '</h2>' +
+        '<div class="muted small">' + Fmt.esc(j.position_name || '') +
+        (j.facility_name ? ' · ' + Fmt.esc(j.facility_name) : '') + '</div>' +
+        '<div class="row gap-2 wrap mt-2">' +
+        '<span class="badge badge-green">รับ ' + Fmt.num(j.openings) + ' อัตรา</span>' +
+        (j.salary_min ? '<span class="badge badge-blue">เงินเดือน ' +
+          Fmt.money(j.salary_min, 0) +
+          (j.salary_max ? ' – ' + Fmt.money(j.salary_max, 0) : '') + ' บาท</span>' : '') +
+        '<span class="badge badge-amber">ปิดรับ ' + Fmt.date(j.close_date, true) +
+        (daysLeft >= 0 ? ' (อีก ' + daysLeft + ' วัน)' : '') + '</span>' +
+        '</div></button>';
+    }).join('');
+  }).catch(function (e) {
+    document.getElementById('jobList').innerHTML = UI.empty(e.message);
+  });
+}
+
+function openJob(id) {
+  publicApi('jobs.get', { id: id }).then(function (j) {
+    Modal.open({
+      title: j.title,
+      size: 'wide',
+      body: UI.defList([
+        ['ตำแหน่ง', Fmt.esc(j.position_name || '—')],
+        ['หน่วยงาน', Fmt.esc(j.facility_name || '—')],
+        ['จำนวนที่รับ', Fmt.num(j.openings) + ' อัตรา'],
+        ['เงินเดือน', j.salary_min ? Fmt.money(j.salary_min, 0) +
+          (j.salary_max ? ' – ' + Fmt.money(j.salary_max, 0) : '') + ' บาท' : 'ตามโครงสร้าง'],
+        ['เปิดรับสมัคร', Fmt.date(j.open_date)],
+        ['ปิดรับสมัคร', Fmt.date(j.close_date)]
+      ]) +
+      (j.qualification ? '<h3 class="mt-3 mb-1" style="font-size:14px">คุณสมบัติเฉพาะตำแหน่ง</h3>' +
+        '<p style="line-height:1.8;white-space:pre-line">' + Fmt.esc(j.qualification) + '</p>' : '') +
+      (j.description ? '<h3 class="mt-3 mb-1" style="font-size:14px">ลักษณะงานที่ปฏิบัติ</h3>' +
+        '<p style="line-height:1.8;white-space:pre-line">' + Fmt.esc(j.description) + '</p>' : ''),
+      buttons: [
+        { label: 'ปิด' },
+        { label: 'ยื่นใบสมัคร', kind: 'btn-primary',
+          onClick: function () { setTimeout(function () { applyForm(j); }, 120); } }
+      ]
+    });
+  }).catch(function (e) { Toast.error(e.message); });
+}
+
+const APPLY_FIELDS = [
+  { key: 'national_id', label: 'เลขประจำตัวประชาชน', required: true, attrs: 'maxlength="13"' },
+  { key: 'title_th', label: 'คำนำหน้า', required: true },
+  { key: 'first_name_th', label: 'ชื่อ', required: true },
+  { key: 'last_name_th', label: 'นามสกุล', required: true },
+  { key: 'gender', label: 'เพศ', type: 'select', options: [
+      { value: 'M', label: 'ชาย' }, { value: 'F', label: 'หญิง' }, { value: 'OTHER', label: 'อื่น ๆ' }] },
+  { key: 'birth_date', label: 'วันเกิด', type: 'date', required: true },
+  { key: 'phone', label: 'โทรศัพท์', required: true },
+  { key: 'email', label: 'อีเมล', type: 'email', required: true },
+  { key: 'edu_level', label: 'ระดับการศึกษาสูงสุด', type: 'select', required: true, options: [
+      { value: 'SECONDARY', label: 'มัธยมศึกษา' }, { value: 'VOCATIONAL', label: 'ปวช./ปวส.' },
+      { value: 'DIPLOMA', label: 'อนุปริญญา' }, { value: 'BACHELOR', label: 'ปริญญาตรี' },
+      { value: 'MASTER', label: 'ปริญญาโท' }, { value: 'DOCTORATE', label: 'ปริญญาเอก' }] },
+  { key: 'edu_degree', label: 'ชื่อวุฒิ' },
+  { key: 'edu_major', label: 'สาขาวิชา' },
+  { key: 'edu_institute', label: 'สถาบัน' },
+  { key: 'edu_year', label: 'ปีที่สำเร็จ (พ.ศ.)', type: 'number' },
+  { key: 'resume_url', label: 'ลิงก์แฟ้มประวัติ/เอกสาร', full: true,
+    hint: 'อัปโหลดไว้ที่ Google Drive แล้ววางลิงก์ (ตั้งค่าให้ผู้มีลิงก์เปิดได้)' }
+];
+
+function applyForm(job) {
+  Modal.open({
+    title: 'ยื่นใบสมัคร — ' + job.title,
+    size: 'wide',
+    body: Form.html(APPLY_FIELDS, {}) +
+      '<p class="small muted">ข้อมูลที่ท่านกรอกจะถูกเก็บและใช้เพื่อการคัดเลือกบุคลากรเท่านั้น</p>',
+    buttons: [
+      { label: 'ยกเลิก' },
+      { label: 'ส่งใบสมัคร', kind: 'btn-primary', onClick: function (body) {
+          const d = Form.read(body, APPLY_FIELDS);
+          if (!validThaiId(d.national_id)) {
+            throw new Error('เลขประจำตัวประชาชนไม่ถูกต้อง');
+          }
+          return publicApi('jobs.apply', {
+            posting_id: job.id,
+            applicant: {
+              national_id: d.national_id, title_th: d.title_th,
+              first_name_th: d.first_name_th, last_name_th: d.last_name_th,
+              gender: d.gender, birth_date: d.birth_date,
+              phone: d.phone, email: d.email, resume_url: d.resume_url,
+              education: [{ level: d.edu_level, degree: d.edu_degree, major: d.edu_major,
+                            institute: d.edu_institute, year: d.edu_year }]
+            }
+          }).then(function (out) {
+            Toast.ok('ส่งใบสมัครเรียบร้อย เลขประจำตัวสอบของท่านคือ ' + (out.application_no || '-'));
+            setTimeout(function () {
+              Modal.open({
+                title: 'ยื่นใบสมัครสำเร็จ',
+                size: 'narrow',
+                body: '<p style="line-height:1.8">ระบบได้รับใบสมัครของท่านแล้ว<br><br>' +
+                      '<strong>เลขประจำตัวสอบ: ' + Fmt.esc(out.application_no || '-') + '</strong>' +
+                      '<br><br>กรุณาบันทึกเลขนี้ไว้ และติดตามประกาศรายชื่อผู้มีสิทธิสอบ' +
+                      'ตามช่องทางที่หน่วยงานกำหนด</p>',
+                buttons: [{ label: 'ปิด', kind: 'btn-primary' }]
+              });
+            }, 200);
+          });
+        } }
+    ]
+  });
+}
+
+function validThaiId(id) {
+  const s = String(id || '').replace(/\D/g, '');
+  if (s.length !== 13) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(s[i]) * (13 - i);
+  return ((11 - (sum % 11)) % 10) === Number(s[12]);
+}
+
+document.addEventListener('DOMContentLoaded', loadJobs);
+</script>
+</body>
+</html>

@@ -1,0 +1,430 @@
+<script>
+/* =============================================================================
+   HRM :: ViewsCore.html
+   โมดูล 01 Dashboard และ 02 Organization
+   ============================================================================= */
+
+VIEWS.dashboard = {
+  render: function (host) {
+    return Promise.all([
+      api('dashboard.summary'),
+      apiSafe('dashboard.headcountTrend', { months: 12 }, { silent: true, fallback: [] }),
+      apiSafe('dashboard.myTasks', {}, { silent: true, fallback: [] }),
+      apiSafe('dashboard.alerts', { limit: 8 }, { silent: true, fallback: [] })
+    ]).then(function (r) {
+      const s = r[0] || {};
+      const trend = r[1] || [];
+      const tasks = r[2] || [];
+      const alerts = r[3] || [];
+
+      const hc = s.headcount || {};
+      const est = s.establishment || {};
+      const att = s.attendance_today || {};
+      const pending = s.pending || {};
+      const mv = s.movement_this_fy || {};
+
+      const pendingTotal = Object.keys(pending).reduce(function (n, k) {
+        return n + Number(pending[k] || 0);
+      }, 0);
+      Shell.setBadge('leave', Number(pending.leave_requests || 0));
+
+      let html = '';
+
+      /* ---- แถวตัวเลขหลัก */
+      html += '<div class="grid grid-4 mb-2">' +
+        UI.stat('กำลังคนทั้งหมด', Fmt.num(hc.total),
+                'ชาย ' + Fmt.num(hc.male) + ' · หญิง ' + Fmt.num(hc.female)) +
+        UI.stat('อัตราว่าง', Fmt.num(est.vacant),
+                'กรอบ ' + Fmt.num(est.planned) + ' · ครองจริง ' + Fmt.num(est.actual), 'amber') +
+        UI.stat('มาปฏิบัติงานวันนี้', Fmt.num(att.present),
+                'สาย ' + Fmt.num(att.late) + ' · ขาด ' + Fmt.num(att.absent) +
+                ' · ลา ' + Fmt.num(att.leave), 'blue') +
+        UI.stat('รอดำเนินการ', Fmt.num(pendingTotal),
+                'ใบลา ' + Fmt.num(pending.leave_requests) +
+                ' · เอกสาร ' + Fmt.num(pending.doc_requests), 'violet') +
+        '</div>';
+
+      html += '<div class="grid grid-2 mb-2">';
+
+      /* ---- งานของฉัน */
+      html += UI.card('งานที่รอฉันดำเนินการ',
+        tasks.length
+          ? '<div class="col gap-2">' + tasks.slice(0, 8).map(function (t) {
+              return '<button class="nav-item" style="color:var(--ink);border:1px solid var(--line)" ' +
+                'onclick="Shell.go(\'' + t.module + '\')">' +
+                '<span class="grow"><strong style="font-size:13.5px">' + Fmt.esc(t.title) + '</strong>' +
+                (t.detail ? '<br><span class="small muted">' + Fmt.esc(t.detail) + '</span>' : '') +
+                '</span>' +
+                (t.since ? '<span class="xsmall muted nowrap">' + Fmt.esc(Fmt.ago(t.since)) + '</span>' : '') +
+                '</button>';
+            }).join('') + '</div>'
+          : UI.empty('ไม่มีงานค้าง — เรียบร้อยดี'),
+        { sub: tasks.length + ' รายการ' });
+
+      /* ---- แนวโน้มกำลังคน */
+      const trendItems = trend.map(function (t) {
+        const d = new Date(t.month_start);
+        return { label: Fmt.TH_SHORT[d.getMonth()], value: t.headcount };
+      });
+      html += UI.card('แนวโน้มกำลังคน 12 เดือน',
+        trendItems.length
+          ? UI.bars(trendItems, { showValue: false }) +
+            '<div class="row between mt-2 small muted">' +
+            '<span>เข้าใหม่ปีนี้ ' + Fmt.num(mv.hired) + ' คน</span>' +
+            '<span>พ้นสภาพปีนี้ ' + Fmt.num(mv.separated) + ' คน</span></div>'
+          : UI.empty('ยังไม่มีข้อมูลเพียงพอ'));
+
+      html += '</div>';
+
+      /* ---- รายการที่ต้องติดตาม */
+      html += UI.card('รายการที่ต้องติดตาม',
+        UI.table([
+          { label: 'บุคลากร', render: function (a) {
+              return employeeLink(a.employee_id, a.full_name_th, a.emp_code); } },
+          { label: 'เรื่อง', render: function (a) {
+              return Fmt.esc(Labels.alert_type[a.alert_type] || a.alert_type) +
+                     '<div class="small muted">' + Fmt.esc(a.detail || '') + '</div>'; } },
+          { label: 'ครบกำหนด', render: function (a) { return Fmt.date(a.due_date, true); } },
+          { label: 'เหลือ', className: 'num', render: function (a) {
+              return a.days_remaining === null ? '—'
+                : (a.days_remaining < 0
+                    ? '<span style="color:var(--rose-600)">เลย ' + Math.abs(a.days_remaining) + ' วัน</span>'
+                    : a.days_remaining + ' วัน'); } },
+          { label: 'ระดับ', render: function (a) { return Labels.badge('severity', a.severity); } }
+        ], alerts, { emptyMessage: 'ไม่มีรายการที่ต้องติดตามในขณะนี้' }),
+        { tight: true,
+          sub: (s.alerts || {}).total ? 'ทั้งหมด ' + Fmt.num(s.alerts.total) + ' รายการ' : '',
+          actions: Store.can('report.read')
+            ? '<button class="btn btn-ghost btn-sm" onclick="Shell.go(\'report\')">ดูรายงานทั้งหมด</button>'
+            : '' });
+
+      /* ---- เงินเดือนงวดล่าสุด */
+      if (s.payroll_last && Store.can('payroll.read')) {
+        const pl = s.payroll_last;
+        html += '<div class="mt-2">' + UI.card('เงินเดือนงวดล่าสุด',
+          UI.defList([
+            ['งวด', Fmt.esc(pl.period)],
+            ['จำนวนคน', Fmt.num(pl.headcount) + ' คน'],
+            ['จ่ายสุทธิรวม', Fmt.money(pl.total_net) + ' บาท'],
+            ['สถานะ', Labels.badge('request_status', pl.status)]
+          ]),
+          { actions: '<button class="btn btn-ghost btn-sm" onclick="Shell.go(\'payroll\')">' +
+                     'ไปที่โมดูลเงินเดือน</button>' }) + '</div>';
+      }
+
+      host.innerHTML = html;
+    });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+
+VIEWS.org = {
+  tab: 'structure',
+
+  render: function (host) {
+    const self = this;
+    return Promise.all([
+      api('org.tree'),
+      apiSafe('org.positionList', {}, { silent: true, fallback: [] }),
+      apiSafe('org.gradeList', {}, { silent: true, fallback: [] })
+    ]).then(function (r) {
+      self.data = { tree: r[0], positions: r[1] || [], grades: r[2] || [] };
+      self.paint(host);
+    });
+  },
+
+  paint: function (host) {
+    host = host || document.getElementById('view');
+    this.host = host;
+    const tabs = [
+      { id: 'structure', label: 'โครงสร้างหน่วยงาน' },
+      { id: 'position',  label: 'ตำแหน่ง' },
+      { id: 'grade',     label: 'ระดับ/ชั้นงาน' },
+      { id: 'slot',      label: 'กรอบอัตรากำลัง' }
+    ];
+    let html = UI.tabs(tabs, this.tab, 'VIEWS.org.setTab');
+    html += '<div id="orgPane">' + UI.loading(3) + '</div>';
+    host.innerHTML = html;
+    this.paintPane();
+  },
+
+  setTab: function (id) { this.tab = id; this.paint(); },
+
+  paintPane: function () {
+    const pane = document.getElementById('orgPane');
+    if (this.tab === 'structure') return this.paintStructure(pane);
+    if (this.tab === 'position')  return this.paintPositions(pane);
+    if (this.tab === 'grade')     return this.paintGrades(pane);
+    if (this.tab === 'slot')      return this.paintSlots(pane);
+  },
+
+  paintStructure: function (pane) {
+    const d = this.data.tree;
+    const canEdit = Store.can('org.manage');
+
+    const html = d.facilities.map(function (f) {
+      const depts = d.departments.filter(function (x) { return x.facility_id === f.id; });
+      const rows = depts.map(function (x) {
+        return '<tr><td><strong>' + Fmt.esc(x.name_th) + '</strong>' +
+          '<div class="small muted">' + Fmt.esc(x.code) + ' · ' + Fmt.esc(x.dept_level) + '</div></td>' +
+          '<td class="num">' + Fmt.num(x.stats.planned) + '</td>' +
+          '<td class="num">' + Fmt.num(x.stats.actual) + '</td>' +
+          '<td class="num">' + (x.stats.vacant > 0
+            ? '<span style="color:var(--gold-500);font-weight:600">' + Fmt.num(x.stats.vacant) + '</span>'
+            : '0') + '</td>' +
+          (canEdit ? '<td class="right"><button class="btn btn-ghost btn-sm" ' +
+            'onclick="VIEWS.org.editDept(\'' + x.id + '\')">แก้ไข</button></td>' : '') +
+          '</tr>';
+      }).join('');
+
+      return UI.card(f.name_th,
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th>หน่วยงาน</th><th class="num">กรอบ</th><th class="num">ครองจริง</th>' +
+        '<th class="num">ว่าง</th>' + (canEdit ? '<th></th>' : '') +
+        '</tr></thead><tbody>' +
+        (rows || '<tr><td colspan="5" class="table-empty">ยังไม่มีหน่วยงานย่อย</td></tr>') +
+        '</tbody></table></div>',
+        { tight: true,
+          sub: 'รหัส ' + f.code + ' · กรอบ ' + Fmt.num(f.stats.planned) +
+               ' · ครองจริง ' + Fmt.num(f.stats.actual),
+          actions: canEdit
+            ? '<button class="btn btn-ghost btn-sm" onclick="VIEWS.org.editFacility(\'' + f.id + '\')">' +
+              'แก้ไขสถานบริการ</button>' : '' });
+    }).join('<div style="height:16px"></div>');
+
+    pane.innerHTML = (canEdit
+      ? '<div class="toolbar"><div class="grow"></div>' +
+        '<button class="btn btn-secondary btn-sm" onclick="VIEWS.org.editFacility()">+ สถานบริการ</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="VIEWS.org.editDept()">+ หน่วยงาน</button></div>'
+      : '') + (html || UI.empty('ยังไม่ได้กำหนดโครงสร้างองค์กร'));
+  },
+
+  paintPositions: function (pane) {
+    const canEdit = Store.can('org.manage');
+    pane.innerHTML = (canEdit
+      ? '<div class="toolbar"><div class="grow"></div>' +
+        '<button class="btn btn-primary btn-sm" onclick="VIEWS.org.editPosition()">+ ตำแหน่ง</button></div>'
+      : '') +
+      UI.card('ตำแหน่งงานขององค์กร', UI.table([
+        { label: 'รหัส', key: 'code', width: '90px' },
+        { label: 'ชื่อตำแหน่ง', render: function (p) {
+            return '<strong>' + Fmt.esc(p.name_th) + '</strong>' +
+              (p.is_managerial ? ' <span class="badge badge-violet">บริหาร</span>' : ''); } },
+        { label: 'สายงาน', key: 'job_family' },
+        { label: 'ระดับ', render: function (p) {
+            return p.job_grades ? Fmt.esc(p.job_grades.name_th) : '—'; } },
+        { label: 'ประเภทการจ้าง', render: function (p) {
+            return Fmt.esc(Labels.employment_type[p.employment_type] || p.employment_type); } },
+        { label: 'สถานะ', render: function (p) {
+            return p.is_active ? '<span class="badge badge-green">ใช้งาน</span>'
+                               : '<span class="badge badge-slate">ปิด</span>'; } },
+        canEdit ? { label: '', className: 'right', render: function (p) {
+            return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.org.editPosition(\'' +
+                   p.id + '\')">แก้ไข</button>'; } } : null
+      ].filter(Boolean), this.data.positions, { emptyMessage: 'ยังไม่ได้กำหนดตำแหน่ง' }),
+      { tight: true });
+  },
+
+  paintGrades: function (pane) {
+    const canEdit = Store.can('org.manage');
+    pane.innerHTML = (canEdit
+      ? '<div class="toolbar"><div class="grow"></div>' +
+        '<button class="btn btn-primary btn-sm" onclick="VIEWS.org.editGrade()">+ ระดับ</button></div>'
+      : '') +
+      UI.card('ระดับ/ชั้นงาน', UI.table([
+        { label: 'รหัส', key: 'code', width: '80px' },
+        { label: 'ชื่อระดับ', key: 'name_th' },
+        { label: 'ลำดับ', key: 'grade_level', className: 'num', width: '80px' },
+        { label: 'เงินเดือนขั้นต่ำ', className: 'num', render: function (g) {
+            return Fmt.money(g.min_salary, 0); } },
+        { label: 'เงินเดือนสูงสุด', className: 'num', render: function (g) {
+            return Fmt.money(g.max_salary, 0); } },
+        canEdit ? { label: '', className: 'right', render: function (g) {
+            return '<button class="btn btn-ghost btn-sm" onclick="VIEWS.org.editGrade(\'' +
+                   g.id + '\')">แก้ไข</button>'; } } : null
+      ].filter(Boolean), this.data.grades, { emptyMessage: 'ยังไม่ได้กำหนดระดับ' }),
+      { tight: true });
+  },
+
+  paintSlots: function (pane) {
+    pane.innerHTML = UI.loading(3);
+    const fy = Store.boot.fiscalYear;
+    apiSafe('org.slotList', { fiscalYear: fy }, { fallback: [] }).then(function (rows) {
+      pane.innerHTML = UI.card('กรอบอัตรากำลัง ปีงบประมาณ ' + fy, UI.table([
+        { label: 'สถานบริการ', key: 'facility_name' },
+        { label: 'หน่วยงาน', key: 'department_name' },
+        { label: 'ตำแหน่ง', key: 'position_name' },
+        { label: 'กรอบ', key: 'planned_count', className: 'num' },
+        { label: 'ครองจริง', key: 'actual_count', className: 'num' },
+        { label: 'ว่าง', className: 'num', render: function (r) {
+            const v = Number(r.vacant_count || 0);
+            return v > 0 ? '<span style="color:var(--gold-500);font-weight:600">' + v + '</span>'
+                 : v < 0 ? '<span style="color:var(--rose-600)">เกิน ' + Math.abs(v) + '</span>'
+                 : '0'; } }
+      ], rows, { emptyMessage: 'ยังไม่ได้กำหนดกรอบอัตรากำลังของปีนี้' }),
+      { tight: true,
+        actions: Store.can('org.manage')
+          ? '<button class="btn btn-primary btn-sm" onclick="VIEWS.org.editSlot()">+ กรอบอัตรา</button>'
+          : '' });
+    });
+  },
+
+  /* ----------------------------------------------------------- ฟอร์มแก้ไข */
+  editFacility: function (id) {
+    const row = id ? this.data.tree.facilities.filter(function (f) { return f.id === id; })[0] : {};
+    const fields = [
+      { key: 'code', label: 'รหัสสถานบริการ', required: true, hint: 'เช่น รหัส 5 หลักของ สนย.' },
+      { key: 'name_th', label: 'ชื่อสถานบริการ', required: true, full: true },
+      { key: 'facility_type', label: 'ประเภท', type: 'select', options: [
+          { value: 'HOSPITAL', label: 'โรงพยาบาล' },
+          { value: 'HEALTH_CENTER', label: 'รพ.สต./ศูนย์สุขภาพชุมชน' },
+          { value: 'CLINIC', label: 'คลินิก' },
+          { value: 'OFFICE', label: 'สำนักงาน' },
+          { value: 'BRANCH', label: 'สาขา' },
+          { value: 'OTHER', label: 'อื่น ๆ' }] },
+      { key: 'bed_size', label: 'จำนวนเตียง', type: 'number' },
+      { key: 'is_active', label: 'เปิดใช้งาน', type: 'checkbox', checkboxLabel: 'เปิดใช้งาน' }
+    ];
+    Modal.open({
+      title: id ? 'แก้ไขสถานบริการ' : 'เพิ่มสถานบริการ',
+      body: Form.html(fields, row || {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            if (id) data.id = id;
+            return api('org.facilitySave', data).then(function () {
+              Toast.ok('บันทึกสถานบริการแล้ว');
+              Shell.reload();
+            });
+          } }
+      ]
+    });
+  },
+
+  editDept: function (id) {
+    const d = this.data.tree;
+    const row = id ? d.departments.filter(function (x) { return x.id === id; })[0] : {};
+    const fields = [
+      { key: 'code', label: 'รหัสหน่วยงาน', required: true },
+      { key: 'name_th', label: 'ชื่อหน่วยงาน', required: true },
+      { key: 'facility_id', label: 'สังกัดสถานบริการ', type: 'select',
+        options: d.facilities.map(function (f) { return { value: f.id, label: f.name_th }; }) },
+      { key: 'parent_id', label: 'หน่วยงานแม่', type: 'select',
+        options: d.departments.filter(function (x) { return x.id !== id; })
+                  .map(function (x) { return { value: x.id, label: x.name_th }; }) },
+      { key: 'dept_level', label: 'ระดับหน่วยงาน', type: 'select', options: [
+          { value: 'GROUP', label: 'กลุ่มงาน' }, { value: 'DIVISION', label: 'ฝ่าย' },
+          { value: 'DEPARTMENT', label: 'งาน' }, { value: 'SECTION', label: 'หน่วย' },
+          { value: 'TEAM', label: 'ทีม' }] },
+      { key: 'sort_order', label: 'ลำดับการแสดง', type: 'number' },
+      { key: 'is_active', label: 'เปิดใช้งาน', type: 'checkbox', checkboxLabel: 'เปิดใช้งาน' }
+    ];
+    Modal.open({
+      title: id ? 'แก้ไขหน่วยงาน' : 'เพิ่มหน่วยงาน',
+      body: Form.html(fields, row || {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            if (id) data.id = id;
+            return api('org.departmentSave', data).then(function () {
+              Toast.ok('บันทึกหน่วยงานแล้ว');
+              Shell.reload();
+            });
+          } }
+      ]
+    });
+  },
+
+  editPosition: function (id) {
+    const row = id ? this.data.positions.filter(function (p) { return p.id === id; })[0] : {};
+    const fields = [
+      { key: 'code', label: 'รหัสตำแหน่ง', required: true },
+      { key: 'name_th', label: 'ชื่อตำแหน่ง', required: true },
+      { key: 'job_family', label: 'สายงาน' },
+      { key: 'job_grade_id', label: 'ระดับ', type: 'select',
+        options: this.data.grades.map(function (g) { return { value: g.id, label: g.name_th }; }) },
+      { key: 'employment_type', label: 'ประเภทการจ้าง', type: 'select',
+        options: Object.keys(Labels.employment_type).map(function (k) {
+          return { value: k, label: Labels.employment_type[k] }; }) },
+      { key: 'is_managerial', label: 'ตำแหน่งบริหาร', type: 'checkbox',
+        checkboxLabel: 'เป็นตำแหน่งบริหาร' },
+      { key: 'job_description', label: 'ลักษณะงาน', type: 'textarea', full: true },
+      { key: 'is_active', label: 'เปิดใช้งาน', type: 'checkbox', checkboxLabel: 'เปิดใช้งาน' }
+    ];
+    Modal.open({
+      title: id ? 'แก้ไขตำแหน่ง' : 'เพิ่มตำแหน่ง',
+      body: Form.html(fields, row || {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            if (id) data.id = id;
+            return api('org.positionSave', data).then(function () {
+              Toast.ok('บันทึกตำแหน่งแล้ว');
+              Shell.reload();
+            });
+          } }
+      ]
+    });
+  },
+
+  editGrade: function (id) {
+    const row = id ? this.data.grades.filter(function (g) { return g.id === id; })[0] : {};
+    const fields = [
+      { key: 'code', label: 'รหัสระดับ', required: true },
+      { key: 'name_th', label: 'ชื่อระดับ', required: true },
+      { key: 'grade_level', label: 'ลำดับความก้าวหน้า', type: 'number',
+        hint: 'ตัวเลขมากกว่า = สูงกว่า' },
+      { key: 'min_salary', label: 'เงินเดือนขั้นต่ำ', type: 'money' },
+      { key: 'max_salary', label: 'เงินเดือนสูงสุด', type: 'money' },
+      { key: 'is_active', label: 'เปิดใช้งาน', type: 'checkbox', checkboxLabel: 'เปิดใช้งาน' }
+    ];
+    Modal.open({
+      title: id ? 'แก้ไขระดับ' : 'เพิ่มระดับ',
+      body: Form.html(fields, row || {}),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            const data = Form.read(body, fields);
+            if (id) data.id = id;
+            return api('org.gradeSave', data).then(function () {
+              Toast.ok('บันทึกระดับแล้ว');
+              Shell.reload();
+            });
+          } }
+      ]
+    });
+  },
+
+  editSlot: function () {
+    const d = this.data;
+    const fields = [
+      { key: 'facility_id', label: 'สถานบริการ', type: 'select',
+        options: d.tree.facilities.map(function (f) { return { value: f.id, label: f.name_th }; }) },
+      { key: 'department_id', label: 'หน่วยงาน', type: 'select',
+        options: d.tree.departments.map(function (x) { return { value: x.id, label: x.name_th }; }) },
+      { key: 'position_id', label: 'ตำแหน่ง', type: 'select', required: true,
+        options: d.positions.map(function (p) { return { value: p.id, label: p.name_th }; }) },
+      { key: 'fiscal_year', label: 'ปีงบประมาณ', type: 'number', required: true },
+      { key: 'planned_count', label: 'จำนวนกรอบ', type: 'number', required: true },
+      { key: 'note', label: 'หมายเหตุ', full: true }
+    ];
+    Modal.open({
+      title: 'กำหนดกรอบอัตรากำลัง',
+      body: Form.html(fields, { fiscal_year: Store.boot.fiscalYear, planned_count: 1 }),
+      buttons: [
+        { label: 'ยกเลิก' },
+        { label: 'บันทึก', kind: 'btn-primary', onClick: function (body) {
+            return api('org.slotSave', Form.read(body, fields)).then(function () {
+              Toast.ok('บันทึกกรอบอัตรากำลังแล้ว');
+              VIEWS.org.paintPane();
+            });
+          } }
+      ]
+    });
+  }
+};
+</script>
