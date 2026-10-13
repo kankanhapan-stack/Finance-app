@@ -16,7 +16,7 @@
   a{color:var(--moss-600)}
 
   /* ---------- login ---------- */
-  #login{min-height:100vh;display:grid;place-items:center;padding:16px;
+  #login{position:fixed;inset:0;z-index:200;overflow:auto;min-height:100vh;display:grid;place-items:center;padding:16px;
     background:radial-gradient(circle at 20% 10%,#2b8a5c33,transparent 50%),radial-gradient(circle at 90% 90%,#b8873a33,transparent 45%),var(--moss-900)}
   .login-card{width:100%;max-width:400px;background:var(--raised);border-radius:16px;padding:32px 28px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
   .login-card h1{font-size:22px;color:var(--moss-800)}
@@ -39,6 +39,7 @@
   .top{display:flex;align-items:center;gap:12px;padding:12px 24px;background:var(--raised);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
   .top h2{font-size:18px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .menu-btn{display:none}
+  .fac-sel{width:auto;max-width:260px;padding:6px 10px;font-size:13px;font-weight:600;background:var(--moss-100);border-color:var(--moss-100)}
   .user-chip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--gold-100);color:var(--gold-500);display:grid;place-items:center;font-weight:700}
   #view{padding:20px 24px 60px;max-width:1400px}
@@ -157,6 +158,7 @@
     #view{padding:16px 16px 60px}
     .g2,.g3,.g4,.form,.form.c3{grid-template-columns:1fr}
     .user-chip span{display:none}
+    .fac-sel{max-width:130px}
     .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .kpi{padding:10px 12px} .kpi .v{font-size:21px}
     .filters input[type=search]{min-width:0;flex:1 1 100%}

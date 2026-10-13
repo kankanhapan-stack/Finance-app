@@ -291,25 +291,107 @@ create table if not exists audit_logs (
   created_at timestamptz not null default now()
 );
 
+-- =====================================================================
+--  หลายสถานบริการ (multi-facility)
+-- =====================================================================
+create table if not exists facilities (
+  id                uuid primary key default gen_random_uuid(),
+  code              text unique,              -- รหัสสถานบริการ (เช่น รหัส 5 หลัก)
+  name              text not null,            -- ชื่อสถานบริการ
+  cm_name           text,                     -- ชื่อ-สกุล CM
+  cm_position       text,                     -- ตำแหน่ง CM
+  director_name     text,                     -- ชื่อ-สกุล ผอ.รพ.สต.
+  fund_name         text,                     -- ชื่อกองทุน
+  center_chair      text,                     -- ชื่อ-สกุล ประธานศูนย์ฯ
+  lao_name          text,                     -- ชื่อ อปท.
+  address           text,
+  subdistrict       text,
+  district          text,
+  province          text,
+  phone             text,
+  approver_name     text,                     -- ชื่อผู้บริหาร (ผู้อนุมัติ)
+  approver_position text,                     -- ตำแหน่งผู้บริหาร
+  active            boolean not null default true,
+  created_at        timestamptz not null default now()
+);
+
+-- งบประมาณที่ได้รับจัดสรรรายปีงบประมาณ (พ.ศ.)
+create table if not exists facility_budgets (
+  id          uuid primary key default gen_random_uuid(),
+  facility_id uuid not null references facilities(id) on delete cascade,
+  fiscal_year int not null,
+  amount      numeric(14,2) not null default 0,
+  note        text,
+  updated_at  timestamptz not null default now(),
+  unique (facility_id, fiscal_year)
+);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['app_users','persons','care_managers','caregivers','care_plans','cg_visits',
+    'cg_payments','cm_payments','projects']
+  loop
+    execute format('alter table %I add column if not exists facility_id uuid references facilities(id) on delete restrict', t);
+    execute format('create index if not exists %I on %I(facility_id)', t || '_facility_idx', t);
+  end loop;
+end $$;
+
+-- ย้ายข้อมูลเดิม (ก่อนรองรับหลายสถานบริการ) เข้าสถานบริการแรก
+do $$
+declare fid uuid;
+begin
+  if exists (select 1 from persons where facility_id is null) or exists (select 1 from caregivers where facility_id is null)
+     or exists (select 1 from care_managers where facility_id is null) or exists (select 1 from projects where facility_id is null)
+     or exists (select 1 from app_users where facility_id is null and role in ('cm','cg')) then
+    select id into fid from facilities order by created_at limit 1;
+    if fid is null then
+      insert into facilities(name, approver_position)
+      values (coalesce((select value->>'name' from settings where key = 'org'), 'สถานบริการหลัก'),
+              (select value->>'director_position' from settings where key = 'org'))
+      returning id into fid;
+    end if;
+    update persons       set facility_id = fid where facility_id is null;
+    update care_managers set facility_id = fid where facility_id is null;
+    update caregivers    set facility_id = fid where facility_id is null;
+    update care_plans    set facility_id = fid where facility_id is null;
+    update cg_visits     set facility_id = fid where facility_id is null;
+    update cg_payments   set facility_id = fid where facility_id is null;
+    update cm_payments   set facility_id = fid where facility_id is null;
+    update projects      set facility_id = fid where facility_id is null;
+    update app_users     set facility_id = fid where facility_id is null and role in ('cm','cg');
+  end if;
+end $$;
+
 -- ---------- View: ผลประเมิน ADL ล่าสุดของแต่ละคน ----------
 create or replace view v_latest_adl with (security_invoker = true) as
 select distinct on (a.person_id)
-  a.*, p.cid, p.prefix, p.first_name, p.last_name, p.gender, p.birth_date, p.moo, p.status as person_status
+  a.*, p.cid, p.prefix, p.first_name, p.last_name, p.gender, p.birth_date, p.moo, p.status as person_status,
+  p.facility_id
 from adl_assessments a
 join persons p on p.id = a.person_id
 order by a.person_id, a.assess_date desc, a.created_at desc;
 
--- ---------- RPC: สรุปตัวเลข Dashboard ----------
-create or replace function dashboard_summary(p_month text default to_char(current_date,'YYYY-MM'))
+-- ---------- RPC: สรุปตัวเลข Dashboard (p_facility = null คือทุกสถานบริการ) ----------
+drop function if exists dashboard_summary(text);
+create or replace function dashboard_summary(p_month text default to_char(current_date,'YYYY-MM'), p_facility uuid default null)
 returns json language sql stable as $$
   with m as (
     select to_date(p_month || '-01','YYYY-MM-DD') as d0,
            (to_date(p_month || '-01','YYYY-MM-DD') + interval '1 month')::date as d1
-  ), la as (select * from v_latest_adl where person_status = 'alive')
+  ),
+  per as (select * from persons       where p_facility is null or facility_id = p_facility),
+  la  as (select * from v_latest_adl  where person_status = 'alive' and (p_facility is null or facility_id = p_facility)),
+  cp  as (select * from care_plans    where p_facility is null or facility_id = p_facility),
+  cgs as (select * from caregivers    where p_facility is null or facility_id = p_facility),
+  cms as (select * from care_managers where p_facility is null or facility_id = p_facility),
+  vs  as (select * from cg_visits     where p_facility is null or facility_id = p_facility),
+  cgp as (select * from cg_payments   where p_facility is null or facility_id = p_facility),
+  cmp as (select * from cm_payments   where p_facility is null or facility_id = p_facility)
   select json_build_object(
-    'persons',        (select count(*) from persons where status='alive'),
-    'elderly',        (select count(*) from persons where status='alive' and birth_date <= current_date - interval '60 years'),
-    'disabled',       (select count(*) from persons where status='alive' and coalesce(disability_type,'') <> ''),
+    'persons',        (select count(*) from per where status='alive'),
+    'elderly',        (select count(*) from per where status='alive' and birth_date <= current_date - interval '60 years'),
+    'disabled',       (select count(*) from per where status='alive' and coalesce(disability_type,'') <> ''),
     'assessed',       (select count(*) from la),
     'dep_social',     (select count(*) from la where dependency_level='ติดสังคม'),
     'dep_home',       (select count(*) from la where dependency_level='ติดบ้าน'),
@@ -317,16 +399,16 @@ returns json language sql stable as $$
     'groups',         (select coalesce(json_object_agg(g, c), '{}'::json) from
                         (select ltc_group g, count(*) c from la where ltc_group is not null group by ltc_group) t),
     'ltc_eligible',   (select count(*) from la where ltc_group is not null),
-    'with_plan',      (select count(distinct person_id) from care_plans where status in ('approved','active')),
-    'plans_draft',    (select count(*) from care_plans where status='draft'),
-    'caregivers',     (select count(*) from caregivers where status='active'),
-    'care_managers',  (select count(*) from care_managers where status='active'),
-    'visits_month',   (select count(*) from cg_visits, m where visit_date >= m.d0 and visit_date < m.d1),
-    'visits_pending', (select count(*) from cg_visits where status='submitted'),
-    'cg_pay_month',   (select coalesce(sum(amount),0) from cg_payments where period = p_month),
-    'cm_pay_month',   (select coalesce(sum(amount),0) from cm_payments where period = p_month),
+    'with_plan',      (select count(distinct person_id) from cp where status in ('approved','active')),
+    'plans_draft',    (select count(*) from cp where status='draft'),
+    'caregivers',     (select count(*) from cgs where status='active'),
+    'care_managers',  (select count(*) from cms where status='active'),
+    'visits_month',   (select count(*) from vs, m where visit_date >= m.d0 and visit_date < m.d1),
+    'visits_pending', (select count(*) from vs where status='submitted'),
+    'cg_pay_month',   (select coalesce(sum(amount),0) from cgp where period = p_month),
+    'cm_pay_month',   (select coalesce(sum(amount),0) from cmp where period = p_month),
     'visits_trend',   (select coalesce(json_agg(json_build_object('month', mo, 'n', n) order by mo), '[]'::json) from (
-                        select to_char(visit_date,'YYYY-MM') mo, count(*) n from cg_visits
+                        select to_char(visit_date,'YYYY-MM') mo, count(*) n from vs
                         where visit_date >= (select d0 from m) - interval '11 months'
                           and visit_date < (select d1 from m)
                         group by 1) t),
@@ -335,9 +417,43 @@ returns json language sql stable as $$
   );
 $$;
 
+-- ---------- RPC: รายงานการเบิกจ่ายงบรายสถานบริการ ตามปีงบประมาณ (พ.ศ.) ----------
+-- งบประมาณ = ยอดที่บันทึกใน facility_budgets ถ้าไม่มีจะประมาณจาก ผู้มีภาวะพึ่งพิง x อัตราต่อคน/ปี
+-- เบิกจ่ายแล้ว = ค่าตอบแทน CG + CM ที่สถานะ "จ่ายแล้ว" ในงวด ต.ค. - ก.ย. ของปีงบประมาณนั้น
+create or replace function facility_budget_report(p_fy int, p_facility uuid default null)
+returns json language sql stable as $$
+  with rate as (
+    select coalesce((select (value->>'fund_per_person_year')::numeric from settings where key = 'rates'), 0) r
+  ), fy as (
+    select to_char(make_date(p_fy - 544, 10, 1), 'YYYY-MM') p0, to_char(make_date(p_fy - 543, 9, 1), 'YYYY-MM') p1
+  ), dep as (
+    select facility_id, count(*) n from v_latest_adl
+    where person_status = 'alive' and ltc_group is not null group by 1
+  ), paid as (
+    select x.facility_id, sum(x.amount) s from (
+      select facility_id, amount, period, status from cg_payments
+      union all
+      select facility_id, amount, period, status from cm_payments
+    ) x, fy
+    where x.status = 'paid' and x.period between fy.p0 and fy.p1 group by 1
+  )
+  select coalesce(json_agg(row_to_json(t) order by t.name), '[]'::json) from (
+    select f.id, f.code, f.name,
+           coalesce(dep.n, 0) as dependents,
+           coalesce(b.amount, coalesce(dep.n, 0) * (select r from rate)) as budget,
+           (b.amount is null) as budget_estimated,
+           coalesce(paid.s, 0) as paid,
+           coalesce(b.amount, coalesce(dep.n, 0) * (select r from rate)) - coalesce(paid.s, 0) as remaining
+    from facilities f
+    left join dep  on dep.facility_id = f.id
+    left join paid on paid.facility_id = f.id
+    left join facility_budgets b on b.facility_id = f.id and b.fiscal_year = p_fy
+    where f.active and (p_facility is null or f.id = p_facility)
+  ) t;
+$$;
+
 -- ---------- ค่าตั้งต้น ----------
 insert into settings(key, value) values
- ('org', '{"name":"องค์การบริหารส่วนตำบล ....","unit":"กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC)","address":"","phone":"","director":"","director_position":"นายก อบต."}'),
  ('rates', '{"fund_per_person_year":10442,"group_budget":{"1":10442,"2":10442,"3":10442,"4":10442},"cg_mode":"per_visit","cg_rate_per_visit":100,"cg_rate_per_patient":300,"cg_monthly_cap":3000,"cm_rate_per_case":100,"cm_rate_per_new_plan":200,"cm_monthly_cap":5000}'),
  ('adl', '{"bed_max":4,"home_max":11,"ltc_max":11}')
 on conflict (key) do nothing;
@@ -353,7 +469,7 @@ declare t text;
 begin
   foreach t in array array['app_users','care_managers','caregivers','persons','surveys','adl_assessments',
     'care_plans','care_plan_items','care_plan_revisions','cg_visits','visit_photos','cg_payments',
-    'cm_payments','projects','project_beneficiaries','settings','audit_logs']
+    'cm_payments','projects','project_beneficiaries','settings','audit_logs','facilities','facility_budgets']
   loop
     execute format('alter table %I enable row level security', t);
   end loop;
@@ -361,5 +477,7 @@ end $$;
 
 -- view/function ไม่ให้ anon / authenticated เรียกได้
 revoke all on v_latest_adl from anon, authenticated;
-revoke execute on function dashboard_summary(text) from public, anon, authenticated;
-grant execute on function dashboard_summary(text) to service_role;
+revoke execute on function dashboard_summary(text, uuid) from public, anon, authenticated;
+grant execute on function dashboard_summary(text, uuid) to service_role;
+revoke execute on function facility_budget_report(int, uuid) from public, anon, authenticated;
+grant execute on function facility_budget_report(int, uuid) to service_role;

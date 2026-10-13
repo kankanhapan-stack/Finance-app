@@ -5,7 +5,8 @@
  *  LTC Dashboard — Front-end (Vanilla JS SPA บน HtmlService)
  * ===================================================================== */
 
-const S = { token: null, user: null, settings: {}, view: 'dashboard', state: {}, charts: [], loaders: {}, exportParams: null };
+const S = { token: null, user: null, settings: {}, facilities: [], facility: '', view: 'dashboard', state: {}, charts: [], loaders: {}, exportParams: null };
+const H = {}; // action handlers (data-act)
 const V = document.getElementById('view');
 const ALL = ['admin', 'cm', 'cg', 'viewer'], READ = ['admin', 'cm', 'viewer'], STAFF = ['admin', 'cm'];
 
@@ -73,7 +74,9 @@ function gs(fn, ...args) {
 async function api(action, payload, quiet) {
   if (!quiet) busy(true);
   try {
-    const r = await gs('api', S.token, action, payload || {});
+    const body = Object.assign({}, payload || {});
+    if (isCentral() && S.facility) body._fac = S.facility; // ผู้ใช้ส่วนกลาง: สถานบริการที่เลือกอยู่
+    const r = await gs('api', S.token, action, body);
     if (!r || !r.ok) {
       if (r && r.code === 'AUTH') doLogout(true);
       throw new Error(r ? r.error : 'เกิดข้อผิดพลาด');
@@ -214,24 +217,30 @@ function downloadB64(b64, mime, filename) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
+/** สร้างไฟล์ Excel จากตาราง (หัวรายงาน 3 บรรทัด + หัวคอลัมน์ + ข้อมูล) */
+function xlsxDownload(title, subtitle, printed, headers, rows, filename, totalRow) {
+  const aoa = [[title], [subtitle || ''], [printed || ''], headers, ...rows];
+  if (totalRow) aoa.push(totalRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = headers.map((h, i) => ({ wch: Math.min(45, Math.max(String(h).length + 2, ...rows.slice(0, 300).map((r) => String(r[i] == null ? '' : r[i]).length + 2))) }));
+  const last = headers.length - 1;
+  ws['!merges'] = [0, 1, 2].map((r) => ({ s: { r, c: 0 }, e: { r, c: last } }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'รายงาน');
+  XLSX.writeFile(wb, filename);
+}
 async function exportReport(report, params, format) {
   toast('กำลังสร้างไฟล์...');
   if (format === 'xlsx') {
     const rep = await api('report.data', { report, params });
-    const aoa = [[rep.title], [rep.subtitle || ''], [rep.printed || ''], rep.headers, ...rep.rows];
-    if (rep.totalCol != null) {
-      const t = rep.headers.map(() => '');
-      t[1] = 'รวมทั้งสิ้น';
-      t[rep.totalCol] = rep.rows.reduce((s, r) => s + Number(r[rep.totalCol] || 0), 0);
-      aoa.push(t);
+    const cols = rep.sumCols || (rep.totalCol != null ? [rep.totalCol] : []);
+    let total = null;
+    if (cols.length) {
+      total = rep.headers.map(() => '');
+      total[1] = 'รวมทั้งสิ้น';
+      cols.forEach((c) => { total[c] = rep.rows.reduce((s, r) => s + Number(r[c] || 0), 0); });
     }
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = rep.headers.map((h, i) => ({ wch: Math.min(45, Math.max(String(h).length + 2, ...rep.rows.slice(0, 300).map((r) => String(r[i] == null ? '' : r[i]).length + 2))) }));
-    const last = rep.headers.length - 1;
-    ws['!merges'] = [0, 1, 2].map((r) => ({ s: { r, c: 0 }, e: { r, c: last } }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'รายงาน');
-    XLSX.writeFile(wb, `${report}_${today()}.xlsx`);
+    xlsxDownload(rep.title, rep.subtitle, rep.printed, rep.headers, rep.rows, `${report}_${today()}.xlsx`, total);
     return;
   }
   const f = await api('export.file', { report, params, format });
@@ -264,13 +273,14 @@ function compressImage(file, max = 1600, q = 0.8) {
 
 // =====================================================================
 //  Auth & shell
+//  - เปิดเว็บมาแสดง Dashboard (สาธารณะ) ทันที มีเมนู "เข้าสู่ระบบ"
+//  - เข้าสู่ระบบแล้วจึงแสดงเมนูอื่นตามบทบาท
 // =====================================================================
 const NAV = [
   { g: 'ภาพรวม' },
-  { id: 'dashboard', label: 'Dashboard', icon: 'home', roles: ALL },
+  { id: 'dashboard', label: 'Dashboard', icon: 'home', roles: ALL, guest: true },
   { g: 'ข้อมูลประชากร', roles: READ },
   { id: 'persons', label: 'ทะเบียนประชากร', icon: 'users', roles: READ },
-  { id: 'surveys', label: 'สำรวจประชากร', icon: 'clipboard', roles: READ },
   { id: 'adl', label: 'ประเมิน ADL', icon: 'activity', roles: READ },
   { g: 'การดูแล' },
   { id: 'careplans', label: 'Care Plan', icon: 'file', roles: ALL },
@@ -285,6 +295,13 @@ const NAV = [
 ];
 const ROLE_TH = { admin: 'ผู้ดูแลระบบ', cm: 'Care Manager', cg: 'Caregiver', viewer: 'ผู้บริหาร/ดูข้อมูล' };
 
+// ---------- สถานบริการ ----------
+const isCentral = () => !!S.user && !S.user.facility_id;
+/** สถานบริการที่กำลังทำงานอยู่ ('' = ทุกแห่ง) */
+function curFacId() { return S.user ? (S.user.facility_id || S.facility || '') : (S.state.pubFac || ''); }
+function curFac() { return S.facilities.find((f) => f.id === curFacId()) || null; }
+function facName(id) { const f = S.facilities.find((x) => x.id === id); return f ? f.name : ''; }
+
 $('#loginForm').addEventListener('submit', run(async (e) => {
   e.preventDefault();
   const f = readForm(e.target);
@@ -295,7 +312,7 @@ $('#loginForm').addEventListener('submit', run(async (e) => {
   if (!r.ok) { $('#loginErr').textContent = r.error; $('#loginErr').hidden = false; return; }
   S.token = r.data.token;
   LS.set('ltc_token', S.token);
-  try { await boot(); } catch (err) { $('#app').hidden = true; $('#login').hidden = false; showFatal(err); }
+  try { await boot(); e.target.reset(); } catch (err) { showFatal(err); }
 }));
 
 function showFatal(e) {
@@ -305,41 +322,73 @@ function showFatal(e) {
 }
 window.__ltcReady = true;
 
+H.showLogin = () => { $('#login').hidden = false; $('#loginErr').hidden = true; setTimeout(() => $('#loginForm [name=username]').focus(), 50); };
+H.hideLogin = () => { $('#login').hidden = true; };
+
 async function boot() {
   const me = await api('me');
-  S.user = me.user; S.settings = me.settings || {};
-  $('#login').hidden = true; $('#app').hidden = false;
-  $('#userName').textContent = `${S.user.full_name} · ${ROLE_TH[S.user.role]}`;
-  $('#avatar').textContent = (S.user.full_name || 'U').trim().charAt(0);
-  $('#orgName').textContent = (S.settings.org && S.settings.org.name) || 'ดูแลผู้มีภาวะพึ่งพิง';
-  renderNav();
+  S.user = me.user; S.settings = me.settings || {}; S.facilities = me.facilities || [];
+  if (isCentral()) {
+    const saved = LS.get('ltc_fac') || '';
+    S.facility = S.facilities.some((f) => f.id === saved) ? saved : '';
+  } else S.facility = '';
+  $('#login').hidden = true;
+  renderShell();
   const last = LS.get('ltc_view');
   go(NAV.some((n) => n.id === last && can(n.roles)) ? last : 'dashboard');
 }
 
+function startGuest() {
+  S.user = null; S.token = null; S.facility = '';
+  renderShell();
+  go('dashboard');
+}
+
 function doLogout(expired) {
   if (S.token) gs('logout', S.token).catch(() => {});
-  S.token = null; S.user = null;
   LS.del('ltc_token');
-  $('#app').hidden = true; $('#login').hidden = false;
   $('#modalRoot').innerHTML = '';
+  startGuest();
   if (expired) toast('หมดเวลาการใช้งาน กรุณาเข้าสู่ระบบใหม่', true);
+}
+
+function renderShell() {
+  const u = S.user;
+  $('#userChip').hidden = !u; $('#btnLogout').hidden = !u; $('#btnLogin').hidden = !!u;
+  if (u) {
+    $('#userName').textContent = `${u.full_name} · ${ROLE_TH[u.role]}${isCentral() ? ' (ส่วนกลาง)' : ''}`;
+    $('#avatar').textContent = (u.full_name || 'U').trim().charAt(0);
+  }
+  const sel = $('#facSel');
+  sel.hidden = !isCentral();
+  if (isCentral()) {
+    sel.innerHTML = `<option value="">ทุกสถานบริการ</option>${opts(S.facilities.map((f) => [f.id, f.name]), S.facility)}`;
+    sel.onchange = () => { S.facility = sel.value; LS.set('ltc_fac', S.facility); refresh(); };
+  }
+  $('#orgName').textContent = u && u.facility_id ? facName(u.facility_id) : 'ดูแลผู้มีภาวะพึ่งพิง';
+  renderNav();
 }
 
 function renderNav() {
   let html = '';
-  NAV.forEach((n, i) => {
-    if (n.g) {
-      const next = NAV.slice(i + 1).find((x) => x.g || can(x.roles));
-      if (next && !next.g) html += `<div class="nav-group">${esc(n.g)}</div>`;
-    } else if (can(n.roles)) html += `<a data-act="nav" data-view="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span></a>`;
-  });
+  if (!S.user) {
+    html = `<a data-act="nav" data-view="dashboard">${icon('home')}<span>Dashboard</span></a>
+      <a data-act="showLogin">${icon('users')}<span>เข้าสู่ระบบ</span></a>`;
+  } else {
+    NAV.forEach((n, i) => {
+      if (n.g) {
+        const next = NAV.slice(i + 1).find((x) => x.g || can(x.roles));
+        if (next && !next.g) html += `<div class="nav-group">${esc(n.g)}</div>`;
+      } else if (can(n.roles)) html += `<a data-act="nav" data-view="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span></a>`;
+    });
+  }
   $('#nav').innerHTML = html;
 }
 
 function go(view) {
+  if (!S.user && view !== 'dashboard') view = 'dashboard';
   S.view = view; S.exportParams = null;
-  LS.set('ltc_view', view);
+  if (S.user) LS.set('ltc_view', view);
   S.charts.forEach((c) => c.destroy()); S.charts = [];
   $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === view));
   const item = NAV.find((n) => n.id === view);
@@ -351,7 +400,6 @@ function go(view) {
 function refresh() { go(S.view); }
 
 // ---------------- global click delegation ----------------
-const H = {};
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]');
   if (!b) {
@@ -377,7 +425,7 @@ H.ppPick = (d, b) => {
 };
 
 // =====================================================================
-//  Dashboard
+//  Dashboard (ใช้ทั้งผู้เยี่ยมชมทั่วไปและผู้ที่เข้าสู่ระบบ)
 // =====================================================================
 const CHART_INK = '#4d5f55', CHART_GRID = '#eceee6', CHART_FILL = '#1f6b47';
 function barChart(canvas, labels, data, opt = {}) {
@@ -399,43 +447,79 @@ function kpi(label, value, sub, accent) {
   return `<div class="kpi ${accent ? 'accent' : ''}"><div class="l">${esc(label)}</div><div class="v">${value}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
 }
 const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '-');
+/** ปีงบประมาณ (พ.ศ.) ปัจจุบัน: ต.ค.-ธ.ค. นับเป็นปีงบถัดไป */
+function fiscalYear() { const d = new Date(); return d.getFullYear() + 543 + (d.getMonth() >= 9 ? 1 : 0); }
+function fyOptions(sel) { const y = fiscalYear(); return opts([0, 1, 2, 3, 4].map((i) => [y - i, 'ปีงบประมาณ ' + (y - i)]), sel); }
+
+async function publicData(p) {
+  busy(true);
+  try {
+    const r = await gs('publicDashboard', p);
+    if (!r || !r.ok) throw new Error(r ? r.error : 'โหลดข้อมูลไม่สำเร็จ');
+    return r.data;
+  } finally { busy(false); }
+}
 
 async function vDashboard() {
-  if (S.user.role === 'cg') return vDashboardCg();
+  if (S.user && S.user.role === 'cg') return vDashboardCg();
   const month = S.state.dashMonth || curMonth();
-  const d = await api('dashboard', { month });
+  const fy = Number(S.state.dashFy) || fiscalYear();
+  let d, budget;
+  if (!S.user) {
+    const r = await publicData({ month, fy, facility_id: S.state.pubFac || '' });
+    d = r.summary; budget = r.budget || []; S.facilities = r.facilities || [];
+    S.settings = Object.assign({}, S.settings, r.settings || {});
+  } else {
+    [d, budget] = await Promise.all([api('dashboard', { month }), api('budget.report', { fy })]);
+  }
   const g = d.groups || {};
+  const fac = curFac();
   V.innerHTML = `
-    <div class="filters"><span class="muted small">ข้อมูลเดือน</span><input type="month" id="dashMonth" value="${month}" style="width:auto">
-      <span class="grow"></span><span class="xs muted">${esc((S.settings.org || {}).name || '')}</span></div>
+    <div class="filters">
+      ${!S.user ? `<select id="pubFac" style="width:auto"><option value="">ทุกสถานบริการ</option>${opts(S.facilities.map((f) => [f.id, f.name]), S.state.pubFac || '')}</select>` : ''}
+      <span class="muted small">ข้อมูลเดือน</span><input type="month" id="dashMonth" value="${month}" style="width:auto">
+      <span class="grow"></span><b class="small">${esc(fac ? fac.name : 'ภาพรวมทุกสถานบริการ')}</b></div>
     <div class="kpis">
       ${kpi('ประชากรในทะเบียน', num(d.persons), 'คน (มีชีวิต)', true)}
       ${kpi('ผู้สูงอายุ 60 ปีขึ้นไป', num(d.elderly), `${pct(d.elderly, d.persons)} ของประชากร`)}
       ${kpi('ผู้พิการ', num(d.disabled), 'คน')}
       ${kpi('ประเมิน ADL แล้ว', num(d.assessed), `${pct(d.assessed, d.elderly)} ของผู้สูงอายุ`)}
       ${kpi('ผู้มีภาวะพึ่งพิง (เข้าเกณฑ์ LTC)', num(d.ltc_eligible), 'ADL ≤ ' + ((S.settings.adl || {}).ltc_max || 11))}
-      ${kpi('มี Care Plan', num(d.with_plan), `${pct(d.with_plan, d.ltc_eligible)} ของผู้เข้าเกณฑ์ · ร่าง ${d.plans_draft}`)}
+      ${kpi('มี Care Plan', num(d.with_plan), `${pct(d.with_plan, d.ltc_eligible)} ของผู้เข้าเกณฑ์`)}
       ${kpi('Caregiver / Care Manager', `${d.caregivers} / ${d.care_managers}`, 'ที่ปฏิบัติงาน')}
-      ${kpi('การเยี่ยมของ CG เดือนนี้', num(d.visits_month), `รอตรวจสอบ ${num(d.visits_pending)} รายการ`)}
+      ${kpi('การเยี่ยมของ CG เดือนนี้', num(d.visits_month), S.user ? `รอตรวจสอบ ${num(d.visits_pending)} รายการ` : thMonth(month))}
       ${kpi('ค่าตอบแทน CG', money(d.cg_pay_month), thMonth(month))}
       ${kpi('ค่าตอบแทน CM', money(d.cm_pay_month), thMonth(month))}
+    </div>
+    <div class="card mb">
+      <div class="row mb"><h3 class="grow" style="margin:0">รายงานการเบิกจ่ายงบโครงการดูแลผู้สูงอายุที่มีภาวะพึ่งพิง รายสถานบริการ</h3>
+        <select id="dashFy" style="width:auto">${fyOptions(fy)}</select>
+        ${S.user && S.user.role !== 'cg' ? exportBtns('budget', { params: { fy } }) : '<button class="btn btn-o btn-sm" data-act="budgetXlsx">Excel</button>'}</div>
+      <div id="budgetTbl">${budgetTable(budget)}</div>
     </div>
     <div class="grid g3">
       <div class="card"><h3>ระดับการพึ่งพิง (ADL ล่าสุด)</h3><div class="chart-box"><canvas id="cLevel"></canvas></div></div>
       <div class="card"><h3>กลุ่มชุดสิทธิประโยชน์ LTC</h3><div class="chart-box"><canvas id="cGroup"></canvas></div></div>
-      <div class="card"><h3>สิ่งที่ต้องดำเนินการ</h3>
+      ${S.user ? `<div class="card"><h3>สิ่งที่ต้องดำเนินการ</h3>
         <div class="grid" style="gap:10px">
           ${todo('ผู้เข้าเกณฑ์ที่ยังไม่มี Care Plan', Math.max(0, d.ltc_eligible - d.with_plan), 'adl')}
           ${todo('Care Plan รออนุมัติ (ร่าง)', d.plans_draft, 'careplans')}
           ${todo('บันทึกการเยี่ยมรอตรวจสอบ', d.visits_pending, 'visits')}
           ${todo('ผู้สูงอายุที่ยังไม่ได้ประเมิน ADL', Math.max(0, d.elderly - d.assessed), 'persons')}
-        </div></div>
+        </div></div>`
+        : `<div class="card"><h3>ความครอบคลุมการดูแล</h3><div class="grid" style="gap:12px">
+          ${coverage('ผู้สูงอายุได้รับการประเมิน ADL', d.assessed, d.elderly)}
+          ${coverage('ผู้มีภาวะพึ่งพิงมี Care Plan', d.with_plan, d.ltc_eligible)}
+        </div></div>`}
     </div>
     <div class="grid g2 mt">
       <div class="card"><h3>จำนวนการเยี่ยมของ CG ย้อนหลัง 12 เดือน</h3><div class="chart-box"><canvas id="cTrend"></canvas></div></div>
       <div class="card"><h3>ผู้มีภาวะพึ่งพิงรายหมู่บ้าน</h3><div class="chart-box"><canvas id="cMoo"></canvas></div></div>
     </div>`;
+  S.state.budgetRows = budget; S.state.budgetFy = fy;
   $('#dashMonth').onchange = (e) => { S.state.dashMonth = e.target.value; refresh(); };
+  $('#dashFy').onchange = (e) => { S.state.dashFy = e.target.value; refresh(); };
+  if ($('#pubFac')) $('#pubFac').onchange = (e) => { S.state.pubFac = e.target.value; refresh(); };
   barChart($('#cLevel'), ['ติดสังคม', 'ติดบ้าน', 'ติดเตียง'], [d.dep_social, d.dep_home, d.dep_bed], { unit: 'คน', colors: ['#7fb894', '#2b8a5c', '#123a2b'] });
   barChart($('#cGroup'), ['กลุ่ม 1', 'กลุ่ม 2', 'กลุ่ม 3', 'กลุ่ม 4'], [1, 2, 3, 4].map((k) => g[k] || 0), { unit: 'คน', colors: ['#a7d0b5', '#5fa67b', '#2b7a50', '#123a2b'] });
   const months = [];
@@ -446,6 +530,36 @@ async function vDashboard() {
   const moo = d.by_moo || [];
   barChart($('#cMoo'), moo.map((x) => 'หมู่ ' + x.moo), moo.map((x) => x.n), { unit: 'คน', horizontal: true });
 }
+
+function coverage(label, a, b) {
+  const p = b ? Math.min(100, Math.round((a / b) * 100)) : 0;
+  return `<div><div class="row small"><span class="grow">${esc(label)}</span><b>${b ? p + '%' : '-'}</b></div>
+    <div class="level-bar mt" style="margin-top:6px"><span style="width:${p}%;background:var(--moss-600)"></span></div>
+    <div class="xs muted" style="margin-top:4px">${num(a)} จาก ${num(b)} คน</div></div>`;
+}
+
+const BUDGET_HEAD = ['ลำดับ', 'ชื่อสถานบริการ', 'จำนวนผู้สูงอายุที่มีภาวะพึ่งพิง (คน)', 'จำนวนเงินงบประมาณ (บาท)', 'เบิกจ่ายแล้ว (บาท)', 'คงเหลือ (บาท)'];
+function budgetTable(rows) {
+  if (!rows.length) return '<div class="empty">ยังไม่มีข้อมูลสถานบริการ</div>';
+  const t = rows.reduce((s, r) => ({ dep: s.dep + Number(r.dependents), b: s.b + Number(r.budget), p: s.p + Number(r.paid), r: s.r + Number(r.remaining) }), { dep: 0, b: 0, p: 0, r: 0 });
+  const est = rows.some((r) => r.budget_estimated);
+  return tableHtml([
+    { h: 'ลำดับ', f: (r, i) => i + 1, cls: 'center' },
+    { h: 'ชื่อสถานบริการ', f: (r) => `<b>${esc(r.name)}</b>${r.budget_estimated ? ' <span class="xs muted" title="ประมาณการ">*</span>' : ''}` },
+    { h: 'จำนวนผู้สูงอายุที่มีภาวะพึ่งพิง', f: (r) => num(r.dependents), cls: 'right' },
+    { h: 'จำนวนเงินงบประมาณ (บาท)', f: (r) => money(r.budget), cls: 'right' },
+    { h: 'เบิกจ่ายแล้ว (บาท)', f: (r) => `${money(r.paid)}<div class="xs muted">${pct(Number(r.paid), Number(r.budget))}</div>`, cls: 'right' },
+    { h: 'คงเหลือ (บาท)', f: (r) => `<span style="${Number(r.remaining) < 0 ? 'color:var(--rose-600);font-weight:700' : ''}">${money(r.remaining)}</span>`, cls: 'right' }
+  ], rows, { foot: `<tr style="background:#f3f4ee"><td></td><td><b>รวมทั้งสิ้น</b></td><td class="right"><b>${num(t.dep)}</b></td>
+    <td class="right"><b>${money(t.b)}</b></td><td class="right"><b>${money(t.p)}</b><div class="xs muted">${pct(t.p, t.b)}</div></td><td class="right"><b>${money(t.r)}</b></td></tr>` }) +
+    `<div class="xs muted mt">${est ? '* ยังไม่ได้บันทึกงบที่ได้รับจัดสรร ระบบประมาณจาก จำนวนผู้มีภาวะพึ่งพิง × อัตราต่อคนต่อปี · ' : ''}เบิกจ่ายแล้ว = ค่าตอบแทน CG/CM ที่บันทึกสถานะ "จ่ายแล้ว" ในงวด ต.ค.–ก.ย. ของปีงบประมาณ</div>`;
+}
+H.budgetXlsx = () => {
+  const rows = S.state.budgetRows || [];
+  xlsxDownload(`รายงานการเบิกจ่ายงบโครงการดูแลผู้สูงอายุที่มีภาวะพึ่งพิง รายสถานบริการ ปีงบประมาณ ${S.state.budgetFy}`, '', '',
+    BUDGET_HEAD, rows.map((r, i) => [i + 1, r.name, Number(r.dependents), Number(r.budget), Number(r.paid), Number(r.remaining)]), `budget_${S.state.budgetFy}.xlsx`);
+};
+
 function todo(label, n, view) {
   return `<a class="row card" style="padding:10px 12px;text-decoration:none;color:inherit;cursor:pointer" data-act="nav" data-view="${view}">
     <span class="grow small">${esc(label)}</span><span class="tag ${n ? 't-amber' : 't-green'}">${num(n)}</span></a>`;
@@ -477,7 +591,7 @@ const PREFIX = ['นาย', 'นาง', 'นางสาว', 'ด.ช.', 'ด
 const RIGHTS = ['UC (บัตรทอง)', 'ข้าราชการ', 'ประกันสังคม', 'อปท.', 'อื่นๆ'];
 const DISAB = ['การเห็น', 'การได้ยินหรือสื่อความหมาย', 'การเคลื่อนไหวหรือทางร่างกาย', 'จิตใจหรือพฤติกรรม', 'สติปัญญา', 'การเรียนรู้', 'ออทิสติก'];
 function personFields() {
-  const o = S.settings.org || {};
+  const o = curFac() || {};
   return [
     { k: 'cid', label: 'เลขบัตรประชาชน', attrs: 'maxlength="17" inputmode="numeric"', hint: '13 หลัก' },
     { k: 'prefix', label: 'คำนำหน้า', type: 'select', options: PREFIX },
@@ -559,7 +673,7 @@ H.personOpen = async (d) => {
         ${can(['admin']) ? `<button class="btn btn-d btn-sm" data-pdel>ลบ</button>` : ''}</div>` : ''}
     </div>
     <div class="tabs" data-tabs>
-      <button class="on" data-tab="info">ข้อมูลทั่วไป</button><button data-tab="sv">การสำรวจ (${r.surveys.length})</button>
+      <button class="on" data-tab="info">ข้อมูลทั่วไป</button>
       <button data-tab="adl">ประเมิน ADL (${r.adl.length})</button><button data-tab="cp">Care Plan (${r.plans.length})</button><button data-tab="vs">การเยี่ยม (${r.visits.length})</button>
     </div>
     <div data-pane="info"><dl class="kv">
@@ -567,8 +681,6 @@ H.personOpen = async (d) => {
       <dt>โทรศัพท์</dt><dd>${esc(p.phone || '-')}</dd><dt>วันเกิด</dt><dd>${thDate(p.birth_date)}</dd>
       <dt>สิทธิการรักษา</dt><dd>${esc(p.health_right || '-')}</dd><dt>โรคประจำตัว</dt><dd>${esc(p.chronic_diseases || '-')}</dd>
       <dt>ความพิการ</dt><dd>${esc(p.disability_type || '-')}</dd></dl></div>
-    <div data-pane="sv" hidden>${isStaff() ? `<button class="btn btn-p btn-sm mb" data-act="surveyNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ บันทึกการสำรวจ</button>` : ''}
-      ${tableHtml([{ h: 'วันที่', f: (s) => thDate(s.survey_date) }, { h: 'การอยู่อาศัย', f: (s) => esc(s.living_arrangement || '') }, { h: 'ผู้ดูแลหลัก', f: (s) => esc([s.main_caregiver, s.caregiver_relation].filter(Boolean).join(' / ')) }, { h: 'ความต้องการ', f: (s) => `<span class="small">${esc(s.needs || '')}</span>` }, { h: 'ผู้สำรวจ', f: (s) => esc(s.surveyor || '') }], r.surveys, { rowAct: isStaff() ? 'surveyEdit' : '' })}</div>
     <div data-pane="adl" hidden>${isStaff() ? `<button class="btn btn-p btn-sm mb" data-act="adlNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ ประเมิน ADL</button>` : ''}
       ${tableHtml([{ h: 'วันที่', f: (a) => thDate(a.assess_date) }, { h: 'คะแนน', f: (a) => `<b>${a.total_score}</b>/20`, cls: 'center' }, { h: 'ระดับ', f: (a) => levelTag(a.dependency_level) }, { h: 'กลุ่ม', f: (a) => groupTag(a.ltc_group) }, { h: 'ภาวะสับสน', f: (a) => (a.cognitive_impairment ? 'มี' : '-') }, { h: 'ผู้ประเมิน', f: (a) => esc(a.assessor || '') }], r.adl, { rowAct: isStaff() ? 'adlEdit' : '' })}</div>
     <div data-pane="cp" hidden>${isStaff() && adl && adl.ltc_group ? `<button class="btn btn-p btn-sm mb" data-act="planNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ จัดทำ Care Plan</button>` : ''}
@@ -663,72 +775,6 @@ H.personImport = () => {
     if (S.view === 'persons') loadPersons();
   });
 };
-
-// =====================================================================
-//  Surveys — การสำรวจประชากร
-// =====================================================================
-const NEEDS = ['เบี้ยยังชีพ', 'อุปกรณ์ช่วยเหลือ', 'ปรับปรุงที่อยู่อาศัย', 'ผู้ดูแล/CG', 'กายภาพบำบัด', 'อาหาร/โภชนาการ', 'ยาและเวชภัณฑ์', 'การเดินทางไปรับบริการ', 'สวัสดิการสังคม', 'ผ้าอ้อมผู้ใหญ่'];
-function surveyFields(display) {
-  return [
-    { k: 'person_id', label: 'บุคคลที่สำรวจ', type: 'person', display, span: true, req: true },
-    { k: 'survey_date', label: 'วันที่สำรวจ', type: 'date', def: today(), req: true },
-    { k: 'surveyor', label: 'ผู้สำรวจ', def: S.user.full_name },
-    { k: 'living_arrangement', label: 'การอยู่อาศัย', type: 'select', options: ['อยู่คนเดียว', 'อยู่กับคู่สมรส', 'อยู่กับบุตรหลาน', 'อยู่กับญาติ', 'อยู่ลำพังในเวลากลางวัน'] },
-    { k: 'income_level', label: 'รายได้ต่อเดือน', type: 'select', options: ['ไม่มีรายได้', 'ต่ำกว่า 3,000 บาท', '3,000-10,000 บาท', 'มากกว่า 10,000 บาท'] },
-    { k: 'main_caregiver', label: 'ผู้ดูแลหลักในครอบครัว' },
-    { k: 'caregiver_relation', label: 'ความสัมพันธ์', type: 'select', options: ['คู่สมรส', 'บุตร', 'หลาน', 'ญาติ', 'เพื่อนบ้าน', 'ไม่มีผู้ดูแล'] },
-    { k: 'housing_condition', label: 'สภาพที่อยู่อาศัย', type: 'select', options: ['มั่นคงแข็งแรง', 'ชำรุดบางส่วน', 'ทรุดโทรม ต้องปรับปรุง'] },
-    { k: 'equipment', label: 'อุปกรณ์ที่มี/ต้องการ', ph: 'เช่น ที่นอนลม รถเข็น ไม้เท้า' },
-    { k: 'needs', label: 'ความต้องการช่วยเหลือ', type: 'multi', options: NEEDS, span: true },
-    { k: 'notes', label: 'หมายเหตุ', type: 'textarea', span: true }
-  ];
-}
-async function vSurveys() {
-  const st = S.state.surveys = S.state.surveys || { from: '', to: '', page: 1, size: 50 };
-  V.innerHTML = `<div class="filters">
-      <span class="small muted">ช่วงวันที่</span><input type="date" id="sf" value="${st.from}" style="width:auto"><input type="date" id="stt" value="${st.to}" style="width:auto">
-      <span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="surveyNew">+ บันทึกการสำรวจ</button>' : ''}${exportBtns('surveys')}
-    </div><div id="slist"></div>`;
-  ['#sf', '#stt'].forEach((s) => { $(s).onchange = () => { st.from = $('#sf').value; st.to = $('#stt').value; st.page = 1; loadSurveys(); }; });
-  S.exportParams = () => ({ from: st.from, to: st.to });
-  S.loaders.surveys = run(loadSurveys);
-  await loadSurveys();
-}
-async function loadSurveys() {
-  const r = await api('surveys.list', S.state.surveys);
-  S.state.surveyRows = Object.fromEntries(r.rows.map((x) => [x.id, x]));
-  $('#slist').innerHTML = tableHtml([
-    { h: 'วันที่', f: (s) => thDate(s.survey_date) },
-    { h: 'ชื่อ-สกุล', f: (s) => `<b>${esc(fname(s.persons))}</b><div class="xs muted">หมู่ ${esc(s.persons ? s.persons.moo || '-' : '-')} · อายุ ${age(s.persons && s.persons.birth_date)}</div>` },
-    { h: 'การอยู่อาศัย', f: (s) => esc(s.living_arrangement || '') },
-    { h: 'ผู้ดูแลหลัก', f: (s) => esc([s.main_caregiver, s.caregiver_relation].filter(Boolean).join(' / ')) },
-    { h: 'ที่อยู่อาศัย', f: (s) => esc(s.housing_condition || '') },
-    { h: 'ความต้องการ', f: (s) => `<span class="small">${esc(s.needs || '')}</span>` },
-    { h: 'ผู้สำรวจ', f: (s) => esc(s.surveyor || '') }
-  ], r.rows, { rowAct: isStaff() ? 'surveyEdit' : '', empty: 'ยังไม่มีข้อมูลการสำรวจ' }) + pager(r, 'surveys');
-}
-H.surveyNew = (d) => surveyForm({ person_id: d.person }, d.label);
-H.surveyEdit = async (d) => {
-  let s = (S.state.surveyRows || {})[d.id];
-  if (!s) s = (await api('surveys.list', { page: 1, size: 500 })).rows.find((x) => x.id === d.id);
-  if (s) surveyForm(s, fname(s.persons));
-};
-function surveyForm(s, label) {
-  const m = openModal({ title: s.id ? 'แก้ไขการสำรวจ' : 'บันทึกการสำรวจประชากร', wide: true, body: formHtml(surveyFields(label), s),
-    foot: `${s.id ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button>
-      <button class="btn btn-o" data-save="adl">บันทึก + ประเมิน ADL ต่อ</button><button class="btn btn-p" data-save>บันทึก</button>` });
-  $$('[data-save]', m).forEach((b) => { b.onclick = run(async () => {
-    validate(m);
-    const data = Object.assign(readForm(m), { id: s.id });
-    data.needs = data.needs || '';
-    await api('surveys.save', data);
-    closeModal(m); toast('บันทึกการสำรวจแล้ว');
-    if (S.view === 'surveys') loadSurveys();
-    if (b.dataset.save === 'adl') adlForm({ person_id: data.person_id }, $('.pp-q', m).value);
-  }); });
-  const del = $('[data-del]', m);
-  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบรายการสำรวจนี้?', 'ลบ', true))) return; await api('surveys.delete', { id: s.id }); closeModal(m); toast('ลบแล้ว'); if (S.view === 'surveys') loadSurveys(); });
-}
 
 // =====================================================================
 //  ADL (Barthel Index)
@@ -841,6 +887,7 @@ async function vCaregivers() {
     $('#cglist').innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="cgEdit">+ เพิ่ม Caregiver</button>' : ''}${exportBtns('caregivers')}</div>` +
       tableHtml([
         { h: 'ชื่อ-สกุล', f: (c) => `<b>${esc(c.full_name)}</b><div class="xs muted">${esc(c.phone || '')}</div>` },
+        ...(isCentral() && !S.facility ? [{ h: 'สถานบริการ', f: (c) => esc(c.facilities ? c.facilities.name : '-') }] : []),
         { h: 'หมู่', f: (c) => esc(c.moo || '-'), cls: 'center' },
         { h: 'อบรม (ชม.)', f: (c) => esc(c.training_hours || '-'), cls: 'center' },
         { h: 'เลขที่ใบรับรอง', f: (c) => esc(c.cert_no || '-') },
@@ -854,6 +901,7 @@ async function vCaregivers() {
     $('#cglist').innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="cmEdit">+ เพิ่ม Care Manager</button>' : ''}</div>` +
       tableHtml([
         { h: 'ชื่อ-สกุล', f: (c) => `<b>${esc(c.full_name)}</b><div class="xs muted">${esc(c.phone || '')}</div>` },
+        ...(isCentral() && !S.facility ? [{ h: 'สถานบริการ', f: (c) => esc(c.facilities ? c.facilities.name : '-') }] : []),
         { h: 'ตำแหน่ง', f: (c) => esc(c.position || '-') }, { h: 'หน่วยงาน', f: (c) => esc(c.unit || '-') },
         { h: 'เลขที่ใบรับรอง CM', f: (c) => esc(c.cert_no || '-') },
         { h: 'เคสที่ดูแล', f: (c) => `<b>${c.case_count}</b> คน`, cls: 'center' },
@@ -873,8 +921,61 @@ H.cgEdit = async (d) => {
     { k: 'cm_id', label: 'Care Manager ที่กำกับดูแล', type: 'select', options: cms.map((x) => [x.id, x.full_name]) },
     { k: 'bank_name', label: 'ธนาคาร' }, { k: 'bank_account', label: 'เลขที่บัญชี' },
     { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['active', 'ปฏิบัติงาน'], ['inactive', 'พ้นสภาพ']] }
-  ], c, 'c3'), foot: `${c.id && can(['admin']) ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก</button>` });
-  $('[data-save]', m).onclick = run(async () => { validate(m); await api('cg.save', Object.assign(readForm(m), { id: c.id })); closeModal(m); toast('บันทึกแล้ว'); refresh(); });
+  ], c, 'c3') + `
+    <div class="card mt" style="background:#fafaf6">
+      <h3>ผู้รับบริการในความดูแล</h3>
+      ${c.id ? `<div data-patients class="mb"><div class="empty small">กำลังโหลด...</div></div>
+        <div class="f"><label>เลือกผู้รับบริการ (ผู้มีภาวะพึ่งพิงที่เข้าเกณฑ์ LTC)</label>
+          <div class="row" style="flex-wrap:nowrap"><select data-cand style="flex:1"><option value="">กำลังโหลด...</option></select>
+          <button class="btn btn-p" type="button" data-assign>${icon('heart')} รับดูแล</button></div>
+          <div class="xs muted">ถ้าผู้รับบริการยังไม่มี Care Plan ระบบจะสร้าง Care Plan ฉบับร่างให้ (ดึงผล ADL ล่าสุด) เพื่อให้ CM เติมกิจกรรมและอนุมัติต่อ</div></div>`
+        : '<div class="hint">บันทึกข้อมูล Caregiver ก่อน จึงจะเลือกผู้รับบริการและกด "รับดูแล" ได้</div>'}
+    </div>`,
+  foot: `${c.id && can(['admin']) ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ปิด</button><button class="btn btn-p" data-save>บันทึก</button>` });
+
+  const loadAssign = run(async () => {
+    const [pts, cands] = await Promise.all([api('cg.patients', { cg_id: c.id }, true), api('cg.candidates', { cg_id: c.id }, true)]);
+    $('[data-patients]', m).innerHTML = tableHtml([
+      { h: 'ผู้รับบริการ', f: (p) => `<b>${esc(fname(p.persons))}</b><div class="xs muted">หมู่ ${esc(p.persons ? p.persons.moo || '-' : '-')}</div>` },
+      { h: 'ADL / กลุ่ม', f: (p) => `${p.adl_score == null ? '-' : p.adl_score} ${groupTag(p.ltc_group)}` },
+      { h: 'Care Plan', f: (p) => `${esc(p.plan_no || '-')} ${tag(p.status)}` },
+      { h: '', f: (p) => `<button class="btn btn-o btn-sm" type="button" data-unassign="${p.id}">ยกเลิกการดูแล</button>`, cls: 'right' }
+    ], pts, { empty: 'ยังไม่มีผู้รับบริการในความดูแล' });
+    const avail = cands.filter((x) => x.cg_id !== c.id);
+    const label = (x) => `${fname(x)} · หมู่ ${x.moo || '-'} · ADL ${x.total_score} กลุ่ม ${x.ltc_group}`;
+    const free = avail.filter((x) => !x.cg_id), taken = avail.filter((x) => x.cg_id);
+    $('[data-cand]', m).innerHTML = `<option value="">— เลือกผู้รับบริการ —</option>` +
+      (free.length ? `<optgroup label="ยังไม่มี CG ดูแล (${free.length})">${free.map((x) => `<option value="${x.person_id}">${esc(label(x))}</option>`).join('')}</optgroup>` : '') +
+      (taken.length ? `<optgroup label="มี CG ดูแลแล้ว — รับโอน (${taken.length})">${taken.map((x) => `<option value="${x.person_id}" data-other="${esc(x.cg_name || '')}">${esc(label(x) + ' — ดูแลโดย ' + (x.cg_name || ''))}</option>`).join('')}</optgroup>` : '');
+  });
+  if (c.id) {
+    loadAssign();
+    $('[data-assign]', m).onclick = run(async () => {
+      const sel = $('[data-cand]', m);
+      if (!sel.value) throw new Error('กรุณาเลือกผู้รับบริการ');
+      const other = sel.selectedOptions[0].dataset.other;
+      if (other && !(await askConfirm(`ผู้รับบริการรายนี้อยู่ในความดูแลของ ${other} ต้องการโอนมาให้ ${c.full_name} ดูแลหรือไม่?`, 'รับโอนดูแล'))) return;
+      const r = await api('cg.assign', { cg_id: c.id, person_id: sel.value });
+      toast(r.created ? `รับดูแลแล้ว · สร้าง Care Plan ฉบับร่าง ${r.plan_no} (ให้ CM เติมกิจกรรมและอนุมัติ)` : `รับดูแลแล้ว ตาม Care Plan ${r.plan_no}`);
+      loadAssign();
+    });
+    m.addEventListener('click', run(async (e) => {
+      const b = e.target.closest('[data-unassign]');
+      if (!b || !(await askConfirm('ยกเลิกการดูแลผู้รับบริการรายนี้? (Care Plan จะไม่มี CG ผู้ดูแล)', 'ยกเลิกการดูแล', true))) return;
+      await api('cg.unassign', { plan_id: b.dataset.unassign, cg_id: c.id });
+      toast('ยกเลิกการดูแลแล้ว'); loadAssign();
+    }));
+  }
+  $('[data-save]', m).onclick = run(async () => {
+    validate(m);
+    const saved = await api('cg.save', Object.assign(readForm(m), { id: c.id }));
+    closeModal(m); toast('บันทึกแล้ว');
+    if (S.view === 'caregivers') await vCaregivers();
+    if (!c.id) { // เพิ่มใหม่ -> เปิดต่อเพื่อเลือกผู้รับบริการ
+      S.state.cgRows = (S.state.cgRows || []).concat([saved]);
+      H.cgEdit({ id: saved.id });
+    }
+  });
   const del = $('[data-del]', m);
   if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบ Caregiver นี้? (ประวัติการเยี่ยมจะถูกลบด้วย แนะนำให้เปลี่ยนสถานะเป็นพ้นสภาพแทน)', 'ลบ', true))) return; await api('cg.delete', { id: c.id }); closeModal(m); refresh(); });
 };
@@ -1335,7 +1436,7 @@ async function vProjects() {
     ], rows, { rowAct: 'projectEdit', empty: 'ยังไม่มีโครงการ' });
 }
 function projectDefaults(d) {
-  const org = (S.settings.org || {}).name || '';
+  const org = (curFac() || {}).name || '';
   const y = new Date().getFullYear() + 543 + (new Date().getMonth() >= 9 ? 1 : 0);
   return {
     fiscal_year: y, status: 'draft', budget_source: 'กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC)',
@@ -1369,7 +1470,7 @@ H.projectEdit = async (d) => {
       { k: 'rationale', label: 'หลักการและเหตุผล', type: 'textarea', rows: 6, span: true },
       { k: 'objectives', label: 'วัตถุประสงค์', type: 'textarea', rows: 4, span: true },
       { k: 'target_group', label: 'กลุ่มเป้าหมาย', span: true }, { k: 'target_count', label: 'จำนวนเป้าหมาย (คน)', type: 'number' },
-      { k: 'location', label: 'สถานที่ดำเนินการ', def: (S.settings.org || {}).name }, { k: 'responsible', label: 'ผู้รับผิดชอบโครงการ' },
+      { k: 'location', label: 'สถานที่ดำเนินการ', def: (curFac() || {}).name }, { k: 'responsible', label: 'ผู้รับผิดชอบโครงการ' },
       { k: 'start_date', label: 'วันเริ่มโครงการ', type: 'date' }, { k: 'end_date', label: 'วันสิ้นสุดโครงการ', type: 'date' },
       { k: 'budget_source', label: 'แหล่งงบประมาณ' },
       { k: 'expected_outcomes', label: 'ผลที่คาดว่าจะได้รับ', type: 'textarea', rows: 4, span: true },
@@ -1436,13 +1537,13 @@ H.projectEdit = async (d) => {
 // =====================================================================
 const REPORTS = [
   { id: 'persons', title: 'ทะเบียนประชากร', desc: 'รายชื่อประชากรพร้อมผล ADL ล่าสุด', roles: READ, fields: [{ k: 'moo', label: 'หมู่ที่' }, { k: 'elderly', label: 'เฉพาะ 60 ปีขึ้นไป', type: 'checkbox' }, { k: 'disabled', label: 'เฉพาะผู้พิการ', type: 'checkbox' }] },
-  { id: 'surveys', title: 'ผลการสำรวจประชากร', desc: 'ข้อมูลการอยู่อาศัย ผู้ดูแล และความต้องการ', roles: READ, fields: [{ k: 'from', label: 'ตั้งแต่', type: 'date' }, { k: 'to', label: 'ถึง', type: 'date' }] },
   { id: 'adl', title: 'ผลการประเมิน ADL', desc: 'ระดับการพึ่งพิงและกลุ่มชุดสิทธิประโยชน์', roles: READ, fields: [{ k: 'group', label: 'กลุ่ม', type: 'select', options: [['eligible', 'เข้าเกณฑ์ LTC'], ['1', 'กลุ่ม 1'], ['2', 'กลุ่ม 2'], ['3', 'กลุ่ม 3'], ['4', 'กลุ่ม 4']] }, { k: 'moo', label: 'หมู่ที่' }] },
   { id: 'caregivers', title: 'ทะเบียน Caregiver', desc: 'ข้อมูล CG และจำนวนผู้รับบริการ', roles: READ, fields: [] },
   { id: 'plans', title: 'ทะเบียน Care Plan', desc: 'แผนการดูแลรายบุคคลและงบประมาณ', roles: ALL, fields: [{ k: 'status', label: 'สถานะ', type: 'select', options: [['draft', 'ร่าง'], ['approved', 'อนุมัติ'], ['active', 'ดำเนินการ'], ['closed', 'ปิด']] }] },
   { id: 'visits', title: 'บันทึกการปฏิบัติงานของ CG', desc: 'กิจกรรม สัญญาณชีพ และจำนวนรูปภาพ', roles: ALL, fields: [{ k: 'from', label: 'ตั้งแต่', type: 'date', def: today().slice(0, 8) + '01' }, { k: 'to', label: 'ถึง', type: 'date', def: today() }, { k: 'status', label: 'สถานะ', type: 'select', options: [['verified', 'ตรวจแล้ว'], ['submitted', 'รอตรวจ'], ['rejected', 'ส่งกลับ']] }] },
   { id: 'pay_cg', title: 'ค่าตอบแทน Caregiver', desc: 'บัญชีรายละเอียดการจ่ายพร้อมช่องลงนาม', roles: ALL, fields: [{ k: 'period', label: 'งวดเดือน', type: 'month', def: curMonth() }] },
   { id: 'pay_cm', title: 'ค่าตอบแทน Care Manager', desc: 'บัญชีรายละเอียดการจ่ายพร้อมช่องลงนาม', roles: READ, fields: [{ k: 'period', label: 'งวดเดือน', type: 'month', def: curMonth() }] },
+  { id: 'budget', title: 'การเบิกจ่ายงบรายสถานบริการ', desc: 'จำนวนผู้มีภาวะพึ่งพิง งบประมาณ เบิกจ่ายแล้ว คงเหลือ', roles: READ, fields: [{ k: 'fy', label: 'ปีงบประมาณ', type: 'select', blank: false, options: [0, 1, 2, 3, 4].map((i) => [fiscalYear() - i, 'ปีงบประมาณ ' + (fiscalYear() - i)]) }] },
   { id: 'projects', title: 'ทะเบียนโครงการ', desc: 'โครงการดูแลผู้สูงอายุ/ผู้พิการที่มีภาวะพึ่งพิง', roles: READ, fields: [] }
 ];
 async function vReports() {
@@ -1466,22 +1567,43 @@ H.repExport = (d, b) => {
 // =====================================================================
 //  ตั้งค่า
 // =====================================================================
+// ฟิลด์ข้อมูลสถานบริการ (ตามลำดับที่ใช้ในเอกสาร)
+const FAC_FIELDS = [
+  { k: 'name', label: 'ชื่อสถานบริการ', span: true, req: true },
+  { k: 'cm_name', label: 'ชื่อ-สกุล CM' }, { k: 'cm_position', label: 'ตำแหน่ง CM' },
+  { k: 'director_name', label: 'ชื่อ-สกุล ผอ.รพ.สต.' },
+  { k: 'fund_name', label: 'ชื่อกองทุน', span: true, ph: 'เช่น กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC) ...' },
+  { k: 'center_chair', label: 'ชื่อ-สกุล ประธานศูนย์ฯ' }, { k: 'lao_name', label: 'ชื่อ อปท.', ph: 'เช่น อบต. / เทศบาลตำบล ...' },
+  { k: 'address', label: 'ที่อยู่', span: true },
+  { k: 'subdistrict', label: 'ตำบล' }, { k: 'district', label: 'อำเภอ' }, { k: 'province', label: 'จังหวัด' },
+  { k: 'phone', label: 'โทรศัพท์', type: 'tel' },
+  { k: 'approver_name', label: 'ชื่อผู้บริหาร (ผู้อนุมัติ)' }, { k: 'approver_position', label: 'ตำแหน่งผู้บริหาร' }
+];
+async function reloadFacilities() { S.facilities = await api('facilities.list', {}, true); renderShell(); }
+
 async function vSettings() {
   const admin = can(['admin']);
+  const central = isCentral();
   const tab = admin ? S.state.setTab || 'org' : 'pw';
-  const tabs = admin ? [['org', 'ข้อมูลหน่วยงาน'], ['rates', 'อัตราค่าตอบแทน / งบประมาณ'], ['adl', 'เกณฑ์ ADL'], ['users', 'ผู้ใช้งาน'], ['audit', 'บันทึกการใช้งาน'], ['pw', 'เปลี่ยนรหัสผ่าน']] : [['pw', 'เปลี่ยนรหัสผ่าน']];
+  const tabs = admin ? [['org', 'ข้อมูลสถานบริการ'], ['facilities', 'สถานบริการ / งบประมาณ'],
+    ...(central ? [['rates', 'อัตราค่าตอบแทน / งบประมาณกลาง'], ['adl', 'เกณฑ์ ADL']] : []),
+    ['users', 'ผู้ใช้งาน'], ['audit', 'บันทึกการใช้งาน'], ['pw', 'เปลี่ยนรหัสผ่าน']] : [['pw', 'เปลี่ยนรหัสผ่าน']];
   V.innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="setTab" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div><div id="setbody" class="card"></div>`;
   const box = $('#setbody');
   const st = S.settings;
   const saveBtn = '<div class="row mt"><span class="grow"></span><button class="btn btn-p" data-save>บันทึกการตั้งค่า</button></div>';
   if (tab === 'org') {
-    box.innerHTML = formHtml([
-      { k: 'name', label: 'ชื่อหน่วยงาน (อปท.)', span: true, req: true }, { k: 'unit', label: 'ชื่อกองทุน', span: true },
-      { k: 'subdistrict', label: 'ตำบล (ค่าเริ่มต้น)' }, { k: 'district', label: 'อำเภอ' }, { k: 'province', label: 'จังหวัด' },
-      { k: 'address', label: 'ที่อยู่', span: true }, { k: 'phone', label: 'โทรศัพท์' },
-      { k: 'director', label: 'ชื่อผู้บริหาร (ผู้อนุมัติ)' }, { k: 'director_position', label: 'ตำแหน่งผู้บริหาร' }
-    ], st.org || {}, 'c3') + saveBtn;
-    $('[data-save]', box).onclick = run(async () => { validate(box); S.settings = await api('settings.save', { key: 'org', value: readForm(box) }); toast('บันทึกแล้ว'); $('#orgName').textContent = S.settings.org.name; });
+    const f = curFac();
+    if (!f) {
+      box.innerHTML = `<div class="hint">กรุณาเลือกสถานบริการจากช่องเลือกด้านบน หรือเพิ่มสถานบริการใหม่ที่แถบ "สถานบริการ / งบประมาณ"</div>`;
+      return;
+    }
+    box.innerHTML = `<h3>${esc(f.name)}</h3>` + formHtml(FAC_FIELDS, f, 'c3') + saveBtn;
+    $('[data-save]', box).onclick = run(async () => {
+      validate(box);
+      await api('facilities.save', Object.assign(readForm(box), { id: f.id }));
+      await reloadFacilities(); toast('บันทึกข้อมูลสถานบริการแล้ว');
+    });
   } else if (tab === 'rates') {
     const r = st.rates || {}, gb = r.group_budget || {};
     box.innerHTML = `<div class="warn mb">ตรวจสอบอัตราให้ตรงกับประกาศ สปสช. และประกาศคณะอนุกรรมการกองทุน LTC ในพื้นที่ก่อนใช้งานจริง</div>
@@ -1511,12 +1633,29 @@ async function vSettings() {
       { k: 'ltc_max', label: 'เข้าเกณฑ์ LTC: คะแนนไม่เกิน', type: 'number' }
     ], st.adl || {}, 'c3') + saveBtn;
     $('[data-save]', box).onclick = run(async () => { const f = readForm(box); Object.keys(f).forEach((k) => { f[k] = Number(f[k]); }); S.settings = await api('settings.save', { key: 'adl', value: f }); toast('บันทึกแล้ว'); });
+  } else if (tab === 'facilities') {
+    const fy = fiscalYear();
+    const rows = await api('budget.report', { fy });
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    const list = central && !S.facility ? S.facilities : S.facilities.filter((f) => f.id === curFacId());
+    box.innerHTML = `<div class="row mb"><span class="grow small muted">งบประมาณที่ได้รับจัดสรรรายปีงบประมาณ ใช้ในตารางรายงานการเบิกจ่ายบนหน้า Dashboard</span>
+      ${central ? '<button class="btn btn-p" data-act="facEdit">+ เพิ่มสถานบริการ</button>' : ''}</div>` +
+      tableHtml([
+        { h: 'รหัส', f: (f) => esc(f.code || '-') },
+        { h: 'ชื่อสถานบริการ', f: (f) => `<b>${esc(f.name)}</b><div class="xs muted">${esc([f.subdistrict && 'ต.' + f.subdistrict, f.district && 'อ.' + f.district].filter(Boolean).join(' '))}</div>` },
+        { h: 'ผู้มีภาวะพึ่งพิง', f: (f) => num((byId[f.id] || {}).dependents), cls: 'right' },
+        { h: `งบประมาณ ปี ${fy}`, f: (f) => { const r = byId[f.id]; return r ? `${money(r.budget)}${r.budget_estimated ? ' <span class="tag t-amber">ประมาณการ</span>' : ''}` : '-'; }, cls: 'right' },
+        { h: 'สถานะ', f: (f) => (f.active ? tag('active_s') : '<span class="tag">ปิดใช้งาน</span>') }
+      ], list, { rowAct: 'facEdit', empty: 'ยังไม่มีสถานบริการ — กด "+ เพิ่มสถานบริการ"' });
   } else if (tab === 'users') {
     const users = await api('users.list');
     S.state.users = users;
-    box.innerHTML = `<div class="row mb"><span class="grow small muted">บทบาท: ผู้ดูแลระบบ = ทุกเมนู · Care Manager = จัดการข้อมูล/อนุมัติ · Caregiver = บันทึกการเยี่ยมของตนเอง · ผู้บริหาร = ดูข้อมูล/รายงาน</span>
+    box.innerHTML = `<div class="row mb"><span class="grow small muted">บทบาท: ผู้ดูแลระบบ = ทุกเมนู · Care Manager = จัดการข้อมูล/อนุมัติ · Caregiver = บันทึกการเยี่ยมของตนเอง · ผู้บริหาร = ดูข้อมูล/รายงาน
+      ${central ? '<br>ผู้ใช้ที่ไม่ระบุสถานบริการ = ผู้ใช้ส่วนกลาง (เห็นทุกสถานบริการ)' : ''}</span>
       <button class="btn btn-p" data-act="userEdit">+ เพิ่มผู้ใช้</button></div>` +
-      tableHtml([{ h: 'ชื่อผู้ใช้', f: (u) => `<b>${esc(u.username)}</b>` }, { h: 'ชื่อ-สกุล', f: (u) => esc(u.full_name) }, { h: 'บทบาท', f: (u) => `<span class="tag t-blue">${ROLE_TH[u.role]}</span>` },
+      tableHtml([{ h: 'ชื่อผู้ใช้', f: (u) => `<b>${esc(u.username)}</b>` }, { h: 'ชื่อ-สกุล', f: (u) => esc(u.full_name) },
+        { h: 'สถานบริการ', f: (u) => (u.facilities ? esc(u.facilities.name) : '<span class="tag t-gold">ส่วนกลาง</span>') },
+        { h: 'บทบาท', f: (u) => `<span class="tag t-blue">${ROLE_TH[u.role]}</span>` },
         { h: 'เข้าใช้ล่าสุด', f: (u) => (u.last_login ? thDate(u.last_login) : '-') }, { h: 'สถานะ', f: (u) => (u.active ? tag('active_s') : '<span class="tag t-red">ระงับ</span>') }], users, { rowAct: 'userEdit' });
   } else if (tab === 'audit') {
     const logs = await api('audit.list');
@@ -1532,15 +1671,53 @@ async function vSettings() {
   }
 }
 H.setTab = (d) => { S.state.setTab = d.tab; refresh(); };
+H.facEdit = async (d) => {
+  const f = S.facilities.find((x) => x.id === d.id) || { active: true };
+  const central = isCentral();
+  const budgets = f.id ? await api('facilities.budgets', { facility_id: f.id }) : [];
+  const fy = fiscalYear();
+  const m = openModal({ title: f.id ? f.name : 'เพิ่มสถานบริการ', wide: true, body: formHtml([
+    { k: 'code', label: 'รหัสสถานบริการ', ph: 'เช่น รหัส 5 หลัก' }, ...FAC_FIELDS,
+    ...(central ? [{ k: 'active', label: 'เปิดใช้งาน (แสดงในรายงาน/Dashboard)', type: 'checkbox' }] : [])
+  ], f, 'c3') + (f.id ? `
+    <div class="card mt" style="background:#fafaf6"><h3>งบประมาณที่ได้รับจัดสรร (รายปีงบประมาณ)</h3>
+      ${tableHtml([{ h: 'ปีงบประมาณ', f: (b) => b.fiscal_year }, { h: 'จำนวนเงิน (บาท)', f: (b) => money(b.amount), cls: 'right' }, { h: 'หมายเหตุ', f: (b) => esc(b.note || '') }],
+        budgets, { empty: 'ยังไม่ได้บันทึกงบประมาณ (Dashboard จะแสดงเป็นประมาณการ)' })}
+      <div class="row mt" data-budget>
+        <select name="b_fy" style="width:auto">${opts([fy + 1, fy, fy - 1, fy - 2].map((y) => [y, 'ปีงบประมาณ ' + y]), fy)}</select>
+        <input type="number" name="b_amount" min="0" step="0.01" placeholder="จำนวนเงิน (บาท)" style="width:180px">
+        <input type="text" name="b_note" placeholder="หมายเหตุ เช่น เลขที่หนังสือจัดสรร" style="flex:1;min-width:160px">
+        <button class="btn btn-g" type="button" data-bsave>บันทึกงบประมาณ</button></div>
+      <div class="xs muted">บันทึกปีเดิมซ้ำ = แก้ไขยอดของปีนั้น</div></div>` : ''),
+    foot: `<button class="btn btn-o" data-act="closeModal">ปิด</button><button class="btn btn-p" data-save>บันทึกข้อมูลสถานบริการ</button>` });
+  $('[data-save]', m).onclick = run(async () => {
+    validate(m);
+    const data = readForm(m);
+    ['b_fy', 'b_amount', 'b_note'].forEach((k) => delete data[k]);
+    const saved = await api('facilities.save', Object.assign(data, { id: f.id }));
+    await reloadFacilities(); closeModal(m); toast('บันทึกแล้ว');
+    if (S.view === 'settings') refresh();
+    if (!f.id) H.facEdit({ id: saved.id });
+  });
+  const bs = $('[data-bsave]', m);
+  if (bs) bs.onclick = run(async () => {
+    const b = readForm($('[data-budget]', m));
+    if (b.b_amount === '') throw new Error('กรุณากรอกจำนวนเงิน');
+    await api('facilities.budget.save', { facility_id: f.id, fiscal_year: b.b_fy, amount: b.b_amount, note: b.b_note });
+    toast('บันทึกงบประมาณแล้ว'); closeModal(m); H.facEdit({ id: f.id }); if (S.view === 'settings') refresh();
+  });
+};
 H.userEdit = async (d) => {
   const u = (S.state.users || []).find((x) => x.id === d.id) || { role: 'cg', active: true };
+  if (!u.id && !u.facility_id) u.facility_id = curFacId();
   const [cgs, cms] = await Promise.all([api('cg.list'), api('cm.list')]);
   const m = openModal({ title: u.id ? `แก้ไขผู้ใช้ ${u.username}` : 'เพิ่มผู้ใช้งาน', body: formHtml([
     u.id ? { k: '_u', label: 'ชื่อผู้ใช้', attrs: 'disabled' } : { k: 'username', label: 'ชื่อผู้ใช้ (a-z, 0-9)', req: true },
     { k: 'full_name', label: 'ชื่อ-สกุล', req: true },
+    ...(isCentral() ? [{ k: 'facility_id', label: 'สถานบริการ', type: 'select', options: S.facilities.map((f) => [f.id, f.name]), hint: 'เว้นว่าง = ผู้ใช้ส่วนกลาง (เฉพาะผู้ดูแลระบบ/ผู้บริหาร)' }] : []),
     { k: 'role', label: 'บทบาท', type: 'select', blank: false, options: Object.entries(ROLE_TH) },
-    { k: 'caregiver_id', label: 'ผูกกับข้อมูล Caregiver', type: 'select', options: cgs.map((c) => [c.id, c.full_name]), hint: 'จำเป็นสำหรับบทบาท Caregiver' },
-    { k: 'care_manager_id', label: 'ผูกกับข้อมูล Care Manager', type: 'select', options: cms.map((c) => [c.id, c.full_name]) },
+    { k: 'caregiver_id', label: 'ผูกกับข้อมูล Caregiver', type: 'select', options: cgs.map((c) => [c.id, c.full_name + (c.facilities && isCentral() && !S.facility ? ' · ' + c.facilities.name : '')]), hint: 'จำเป็นสำหรับบทบาท Caregiver' },
+    { k: 'care_manager_id', label: 'ผูกกับข้อมูล Care Manager', type: 'select', options: cms.map((c) => [c.id, c.full_name + (c.facilities && isCentral() && !S.facility ? ' · ' + c.facilities.name : '')]) },
     { k: 'password', label: u.id ? 'ตั้งรหัสผ่านใหม่ (เว้นว่างถ้าไม่เปลี่ยน)' : 'รหัสผ่าน', type: 'password', req: !u.id },
     { k: 'active', label: 'เปิดใช้งาน', type: 'checkbox' }
   ], Object.assign({ _u: u.username }, u)),
@@ -1550,16 +1727,16 @@ H.userEdit = async (d) => {
 
 // =====================================================================
 const VIEWS = {
-  dashboard: vDashboard, persons: vPersons, surveys: vSurveys, adl: vAdl, caregivers: vCaregivers, careplans: vCareplans,
+  dashboard: vDashboard, persons: vPersons, adl: vAdl, caregivers: vCaregivers, careplans: vCareplans,
   visits: vVisits, payments: vPayments, projects: vProjects, reports: vReports, settings: vSettings
 };
 
-// เริ่มต้น: ใช้ session เดิมถ้ายังไม่หมดอายุ
+// เริ่มต้น: เปิดหน้า Dashboard ทันที / ถ้ามี session เดิมที่ยังไม่หมดอายุให้เข้าสู่ระบบต่อ
 (async () => {
   const t = LS.get('ltc_token');
-  if (!t) return;
+  if (!t) return startGuest();
   S.token = t;
-  try { await boot(); } catch (e) { S.token = null; LS.del('ltc_token'); $('#app').hidden = true; $('#login').hidden = false; showFatal(e); }
+  try { await boot(); } catch (e) { S.token = null; LS.del('ltc_token'); startGuest(); }
 })();
 })();
 </script>

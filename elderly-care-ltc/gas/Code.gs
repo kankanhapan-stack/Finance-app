@@ -6,6 +6,7 @@
 const APP_NAME = 'ระบบดูแลผู้สูงอายุและผู้มีภาวะพึ่งพิง';
 const SESSION_TTL = 6 * 60 * 60; // วินาที (สูงสุดของ CacheService)
 const MAX_LOGIN_FAIL = 5;
+const SESSION_PREFIX = 'sess2_'; // v2: session มี facility_id (session รุ่นเก่าใช้ไม่ได้ ต้องล็อกอินใหม่)
 
 function doGet() {
   return HtmlService.createTemplateFromFile('Index')
@@ -54,7 +55,7 @@ function newSalt_() { return Utilities.getUuid().replace(/-/g, ''); }
 
 function publicUser_(u) {
   return {
-    id: u.id, username: u.username, full_name: u.full_name, role: u.role,
+    id: u.id, username: u.username, full_name: u.full_name, role: u.role, facility_id: u.facility_id || null,
     caregiver_id: u.caregiver_id, care_manager_id: u.care_manager_id
   };
 }
@@ -75,7 +76,7 @@ function login(username, password) {
     cache.remove(failKey);
     const token = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
     const user = publicUser_(u);
-    cache.put('sess_' + token, JSON.stringify(user), SESSION_TTL);
+    cache.put(SESSION_PREFIX + token, JSON.stringify(user), SESSION_TTL);
     sbUpdate('app_users', 'id=eq.' + u.id, { last_login: new Date().toISOString() });
     audit_(user, 'login', u.id);
     return { ok: true, data: { token: token, user: user } };
@@ -87,14 +88,14 @@ function login(username, password) {
 function sessionUser_(token) {
   if (!token) return null;
   const cache = CacheService.getScriptCache();
-  const raw = cache.get('sess_' + token);
+  const raw = cache.get(SESSION_PREFIX + token);
   if (!raw) return null;
-  cache.put('sess_' + token, raw, SESSION_TTL); // sliding expiration
+  cache.put(SESSION_PREFIX + token, raw, SESSION_TTL); // sliding expiration
   return JSON.parse(raw);
 }
 
 function logout(token) {
-  CacheService.getScriptCache().remove('sess_' + token);
+  CacheService.getScriptCache().remove(SESSION_PREFIX + token);
   return { ok: true };
 }
 
@@ -111,6 +112,30 @@ function createInitialAdmin() {
     salt: salt, password_hash: hashPassword_(pw, salt)
   }, 'username');
   Logger.log('สร้างผู้ใช้ admin เรียบร้อย — ลบ ADMIN_INITIAL_PASSWORD ออกจาก Script Properties ได้แล้ว');
+}
+
+// ======================= Public dashboard (ไม่ต้องล็อกอิน) =======================
+
+/**
+ * ข้อมูลสรุปสำหรับหน้า Dashboard สาธารณะ — เป็นตัวเลขรวมเท่านั้น ไม่มีข้อมูลรายบุคคล
+ * p: { month: 'YYYY-MM', facility_id, fy: ปีงบประมาณ พ.ศ. }
+ */
+function publicDashboard(p) {
+  try {
+    p = p || {};
+    const facilities = sbSelect('facilities', 'select=id,name&active=eq.true&order=name');
+    const fac = p.facility_id && facilities.some(function (f) { return f.id === p.facility_id; }) ? p.facility_id : null;
+    const month = /^\d{4}-\d{2}$/.test(p.month || '') ? p.month : Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM');
+    const fy = Number(p.fy) || currentFiscalYear_();
+    return { ok: true, data: {
+      facilities: facilities,
+      summary: sbRpc('dashboard_summary', { p_month: month, p_facility: fac }),
+      budget: sbRpc('facility_budget_report', { p_fy: fy, p_facility: null }),
+      settings: { adl: getSettings_().adl }
+    } };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // ======================= API dispatcher =======================

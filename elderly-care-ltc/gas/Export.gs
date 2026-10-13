@@ -66,14 +66,14 @@ const STATUS_TH = {
 // ======================= Tabular reports =======================
 
 function buildReport_(p, user) {
-  const org = (getSettings_().org || {});
-  const prm = p.params || {};
-  const sub = org.name || '';
+  const prm = Object.assign({}, p.params || {}, { _fac: p._fac });
+  const facId = facOf_(user, prm);
+  const sub = facId ? getFacility_(facId).name || '' : 'ทุกสถานบริการ';
   if (user.role === 'cg' && ['plans', 'visits', 'pay_cg'].indexOf(p.report) < 0) throw new Error('ไม่มีสิทธิ์ส่งออกรายงานนี้');
   let rep;
   switch (p.report) {
     case 'persons': {
-      const rows = personsList_(Object.assign({}, prm, { page: 1, size: 500 })).rows;
+      const rows = personsList_(Object.assign({}, prm, { page: 1, size: 500 }), user).rows;
       rep = { title: 'ทะเบียนประชากร' + (prm.elderly ? ' (ผู้สูงอายุ 60 ปีขึ้นไป)' : ''),
         headers: ['ลำดับ', 'เลขบัตรประชาชน', 'ชื่อ-สกุล', 'เพศ', 'อายุ', 'บ้านเลขที่', 'หมู่', 'สิทธิการรักษา', 'โรคประจำตัว', 'ความพิการ', 'ADL', 'ระดับ'],
         rows: rows.map(function (r, i) {
@@ -83,7 +83,7 @@ function buildReport_(p, user) {
       break;
     }
     case 'adl': {
-      const rows = adlList_(Object.assign({}, prm, { page: 1, size: 1000 })).rows;
+      const rows = adlList_(Object.assign({}, prm, { page: 1, size: 1000 }), user).rows;
       rep = { title: 'ผลการประเมินความสามารถในการทำกิจวัตรประจำวัน (ADL) ล่าสุด',
         headers: ['ลำดับ', 'ชื่อ-สกุล', 'หมู่', 'อายุ', 'วันที่ประเมิน', 'คะแนน ADL', 'ระดับการพึ่งพิง', 'กลุ่ม LTC', 'ภาวะสับสน', 'ผู้ประเมิน'],
         rows: rows.map(function (r, i) {
@@ -92,18 +92,8 @@ function buildReport_(p, user) {
         }), landscape: true };
       break;
     }
-    case 'surveys': {
-      const rows = surveysList_(Object.assign({}, prm, { page: 1, size: 500 })).rows;
-      rep = { title: 'ผลการสำรวจประชากร/ครัวเรือน',
-        headers: ['ลำดับ', 'วันที่สำรวจ', 'ชื่อ-สกุล', 'หมู่', 'การอยู่อาศัย', 'ผู้ดูแลหลัก', 'รายได้', 'สภาพที่อยู่อาศัย', 'ความต้องการ', 'ผู้สำรวจ'],
-        rows: rows.map(function (r, i) {
-          return [i + 1, thDate_(r.survey_date), fullName_(r.persons), r.persons ? r.persons.moo : '', r.living_arrangement || '',
-            [r.main_caregiver, r.caregiver_relation].filter(String).join(' / '), r.income_level || '', r.housing_condition || '', r.needs || '', r.surveyor || ''];
-        }), landscape: true };
-      break;
-    }
     case 'caregivers': {
-      const rows = cgList_();
+      const rows = cgList_(prm, user);
       rep = { title: 'ทะเบียนผู้ช่วยเหลือดูแลผู้สูงอายุ (Caregiver)',
         headers: ['ลำดับ', 'ชื่อ-สกุล', 'โทรศัพท์', 'หมู่', 'ชม.อบรม', 'เลขที่ใบรับรอง', 'Care Manager', 'จำนวนผู้รับบริการ', 'สถานะ'],
         rows: rows.map(function (r, i) {
@@ -149,7 +139,7 @@ function buildReport_(p, user) {
       break;
     }
     case 'pay_cm': {
-      const rows = payCmList_(prm);
+      const rows = payCmList_(prm, user);
       rep = { title: 'บัญชีรายละเอียดค่าตอบแทนผู้จัดการระบบการดูแล (Care Manager) ประจำเดือน ' + thPeriod_(prm.period),
         headers: ['ลำดับ', 'ชื่อ-สกุล', 'จำนวนเคสที่ดูแล', 'แผนใหม่ที่อนุมัติ', 'จำนวนเงิน (บาท)', 'ธนาคาร/เลขบัญชี', 'สถานะ', 'ลายมือชื่อผู้รับเงิน'],
         rows: rows.map(function (r, i) {
@@ -159,13 +149,26 @@ function buildReport_(p, user) {
       break;
     }
     case 'projects': {
-      const rows = sbSelect('projects', 'select=*&order=fiscal_year.desc');
+      const rows = sbSelect('projects', 'select=*&order=fiscal_year.desc' + facQ_(user, prm));
       rep = { title: 'ทะเบียนโครงการดูแลผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิง',
         headers: ['ลำดับ', 'ปีงบประมาณ', 'รหัส', 'ชื่อโครงการ', 'กลุ่มเป้าหมาย', 'จำนวน', 'ระยะเวลา', 'งบประมาณ', 'แหล่งงบ', 'สถานะ'],
         rows: rows.map(function (r, i) {
           return [i + 1, r.fiscal_year || '', r.code || '', r.title, r.target_group || '', r.target_count || '',
             thDate_(r.start_date) + ' - ' + thDate_(r.end_date), Number(r.budget || 0), r.budget_source || '', STATUS_TH[r.status] || r.status];
         }), totalCol: 7, landscape: true };
+      break;
+    }
+    case 'budget': {
+      if (user.role === 'cg') throw new Error('ไม่มีสิทธิ์');
+      const fy = Number(prm.fy) || currentFiscalYear_();
+      const rows = budgetReport_({ fy: fy, _fac: prm._fac }, user) || [];
+      rep = { title: 'รายงานการเบิกจ่ายงบโครงการดูแลผู้สูงอายุที่มีภาวะพึ่งพิง รายสถานบริการ ปีงบประมาณ ' + fy,
+        headers: ['ลำดับ', 'ชื่อสถานบริการ', 'จำนวนผู้สูงอายุที่มีภาวะพึ่งพิง (คน)', 'จำนวนเงินงบประมาณ (บาท)', 'เบิกจ่ายแล้ว (บาท)', 'คงเหลือ (บาท)', 'ร้อยละเบิกจ่าย'],
+        rows: rows.map(function (r, i) {
+          return [i + 1, r.name + (r.budget_estimated ? ' *' : ''), r.dependents, Number(r.budget), Number(r.paid), Number(r.remaining),
+            r.budget ? (Math.round(r.paid / r.budget * 1000) / 10) + '%' : '-'];
+        }), moneyCols: [3, 4, 5], sumCols: [2, 3, 4, 5],
+        note: '* ยังไม่ได้บันทึกงบที่ได้รับจัดสรร ระบบประมาณจาก จำนวนผู้มีภาวะพึ่งพิง x อัตราต่อคนต่อปี · เบิกจ่ายแล้ว = ค่าตอบแทน CG/CM สถานะจ่ายแล้วในปีงบประมาณ' };
       break;
     }
     default:
@@ -264,7 +267,7 @@ function exportFile_(p, user) {
   if (p.report === 'careplan') return finishDoc_(carePlanDoc_(p.params.id, user), format, 'careplan');
   if (p.report === 'project') {
     if (user.role === 'cg') throw new Error('ไม่มีสิทธิ์');
-    return finishDoc_(projectDoc_(p.params.id), format, 'project');
+    return finishDoc_(projectDoc_(p.params.id, user), format, 'project');
   }
   if (p.report === 'visit') return finishDoc_(visitDoc_(p.params.id, user), format, 'visit');
 
@@ -272,10 +275,20 @@ function exportFile_(p, user) {
   const doc = newDoc_(rep.title, rep.landscape);
   const body = doc.getBody();
   docHeader_(body, rep.title, rep.subtitle);
+  const moneyCols = rep.moneyCols || (rep.totalCol != null ? [rep.totalCol] : []);
   const rows = rep.rows.map(function (r) {
-    return r.map(function (c, i) { return i === rep.totalCol ? money_(c) : c; });
+    return r.map(function (c, i) { return moneyCols.indexOf(i) >= 0 ? money_(c) : c; });
   });
-  if (rep.totalCol != null) {
+  if (rep.sumCols) {
+    const tot = rep.headers.map(function () { return ''; });
+    tot[1] = 'รวมทั้งสิ้น';
+    rep.sumCols.forEach(function (c) {
+      const sum = rep.rows.reduce(function (s, r) { return s + Number(r[c] || 0); }, 0);
+      tot[c] = moneyCols.indexOf(c) >= 0 ? money_(sum) : sum.toLocaleString();
+    });
+    rows.push(tot);
+    table_(body, rep.headers, rows, { size: 11 });
+  } else if (rep.totalCol != null) {
     const sum = rep.rows.reduce(function (s, r) { return s + Number(r[rep.totalCol] || 0); }, 0);
     const tot = rep.headers.map(function () { return ''; });
     tot[1] = 'รวมทั้งสิ้น';
@@ -286,6 +299,7 @@ function exportFile_(p, user) {
   } else {
     table_(body, rep.headers, rows, { size: 11 });
   }
+  if (rep.note) para_(body, rep.note, { size: 11, before: 4 });
   para_(body, 'จำนวน ' + rep.rows.length + ' รายการ   ' + rep.printed, { size: 11, before: 4 });
   if (rep.signatures) signatures_(body, rep.signatures);
   return finishDoc_(doc, format, p.report);
@@ -295,7 +309,7 @@ function exportFile_(p, user) {
 function carePlanDoc_(id, user) {
   const plan = plansGet_({ id: id }, user);
   const person = sbOne('persons', plan.person_id);
-  const org = getSettings_().org || {};
+  const org = getFacility_(plan.facility_id);
   const doc = newDoc_('careplan', false);
   const body = doc.getBody();
   docHeader_(body, 'แผนการดูแลรายบุคคล (Care Plan)', org.name);
@@ -341,8 +355,9 @@ function carePlanDoc_(id, user) {
       return [r.version, thDate_(String(r.created_at).slice(0, 10)), r.reason, r.changed_by || ''];
     }), { size: 12 });
   }
-  signatures_(body, ['ผู้จัดทำแผน (Care Manager)', 'ผู้ให้บริการ (Caregiver)', 'ผู้รับบริการ/ญาติ']);
-  signatures_(body, ['ผู้อนุมัติแผน' + (plan.approved_by ? '\n(' + plan.approved_by + ')' : '')]);
+  signatures_(body, ['ผู้จัดทำแผน (Care Manager)' + (org.cm_name ? '\n' + org.cm_name : ''), 'ผู้ให้บริการ (Caregiver)', 'ผู้รับบริการ/ญาติ']);
+  signatures_(body, ['ผู้อนุมัติแผน' + (org.approver_name ? '\n' + org.approver_name : plan.approved_by ? '\n' + plan.approved_by : '') +
+    (org.approver_position ? '\n' + org.approver_position : '')]);
   return doc;
 }
 
@@ -351,7 +366,7 @@ function visitDoc_(id, user) {
   const v = visitsGet_({ id: id }, user);
   const doc = newDoc_('visit', false);
   const body = doc.getBody();
-  docHeader_(body, 'บันทึกการปฏิบัติงานของผู้ช่วยเหลือดูแล (Caregiver)', (getSettings_().org || {}).name);
+  docHeader_(body, 'บันทึกการปฏิบัติงานของผู้ช่วยเหลือดูแล (Caregiver)', getFacility_(v.facility_id).name);
   para_(body, 'ผู้รับบริการ: ' + fullName_(v.persons) + '   หมู่ ' + (v.persons.moo || '-') + '   Care Plan: ' + (v.care_plans ? v.care_plans.plan_no : '-'));
   para_(body, 'วันที่ ' + thDate_(v.visit_date, true) + '   เวลา ' + (v.start_time || '').slice(0, 5) + ' - ' + (v.end_time || '').slice(0, 5) +
     '   ผู้ปฏิบัติ: ' + (v.caregivers ? v.caregivers.full_name : '-'));
@@ -379,9 +394,9 @@ function visitDoc_(id, user) {
 }
 
 // ---------- เอกสารโครงการ ----------
-function projectDoc_(id) {
-  const pr = projectsGet_({ id: id });
-  const org = getSettings_().org || {};
+function projectDoc_(id, user) {
+  const pr = projectsGet_({ id: id }, user);
+  const org = getFacility_(pr.facility_id);
   const doc = newDoc_('project', false);
   const body = doc.getBody();
   docHeader_(body, 'โครงการ' + pr.title.replace(/^โครงการ/, ''), org.name);
@@ -413,7 +428,7 @@ function projectDoc_(id) {
   sec('ผู้รับผิดชอบโครงการ', pr.responsible);
 
   signatures_(body, ['ผู้เสนอโครงการ', 'ผู้เห็นชอบโครงการ']);
-  signatures_(body, ['ผู้อนุมัติโครงการ\n' + (org.director_position || '')]);
+  signatures_(body, ['ผู้อนุมัติโครงการ' + (org.approver_name ? '\n' + org.approver_name : '') + '\n' + (org.approver_position || '')]);
 
   if (pr.beneficiaries.length) {
     body.appendPageBreak();

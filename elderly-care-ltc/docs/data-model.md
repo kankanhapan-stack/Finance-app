@@ -2,7 +2,11 @@
 
 ```mermaid
 erDiagram
-  persons ||--o{ surveys : "สำรวจ"
+  facilities ||--o{ persons : "ทะเบียน"
+  facilities ||--o{ caregivers : ""
+  facilities ||--o{ care_managers : ""
+  facilities ||--o{ care_plans : ""
+  facilities ||--o{ facility_budgets : "งบรายปี"
   persons ||--o{ adl_assessments : "ประเมิน ADL"
   persons ||--o{ care_plans : "มีแผน"
   persons ||--o{ cg_visits : "ได้รับการเยี่ยม"
@@ -26,7 +30,8 @@ erDiagram
 | ตาราง | หน้าที่ |
 |---|---|
 | `persons` | ทะเบียนประชากร (เลขบัตร unique ใช้ upsert ตอนนำเข้า) |
-| `surveys` | ผลสำรวจรายบุคคล/ครัวเรือน |
+| `facilities` / `facility_budgets` | สถานบริการ (ข้อมูลสำหรับหัวเอกสาร/ผู้ลงนาม) และงบประมาณที่ได้รับจัดสรรรายปีงบประมาณ · ทุกตารางหลักมี `facility_id` |
+| `surveys` | (ไม่ใช้ในหน้าเว็บแล้ว เก็บไว้เพื่อข้อมูลเดิม) |
 | `adl_assessments` | ผล Barthel ADL 10 ข้อ + คะแนนรวม + ระดับ + กลุ่ม 1-4 |
 | `v_latest_adl` | view ผลประเมินล่าสุดของแต่ละคน (security_invoker) |
 | `care_plans` / `care_plan_items` | แผนการดูแล + กิจกรรม (ครั้ง/เดือน × บาท/ครั้ง) |
@@ -36,4 +41,5 @@ erDiagram
 | `projects` / `project_beneficiaries` | โครงการและรายชื่อกลุ่มเป้าหมาย |
 | `settings` | `org`, `rates`, `adl` (JSON) |
 | `app_users` / `audit_logs` | ผู้ใช้และบันทึกการใช้งาน |
-| `dashboard_summary(p_month)` | RPC สรุปตัวเลข Dashboard ในคำสั่งเดียว |
+| `dashboard_summary(p_month, p_facility)` | RPC สรุปตัวเลข Dashboard (null = ทุกสถานบริการ) |
+| `facility_budget_report(p_fy, p_facility)` | RPC รายงานการเบิกจ่ายงบรายสถานบริการตามปีงบประมาณ (พ.ศ.) |
