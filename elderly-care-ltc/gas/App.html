@@ -1425,82 +1425,143 @@ H.paySet = async (d) => {
 // =====================================================================
 async function vProjects() {
   const rows = await api('projects.list');
-  V.innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="projectEdit">+ จัดทำโครงการ</button>' : ''}${exportBtns('projects')}</div>` +
+  V.innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="projectEdit">+ จัดทำโครงการใหม่</button>' : ''}${exportBtns('projects')}</div>` +
     tableHtml([
       { h: 'ปีงบ', f: (p) => esc(p.fiscal_year || ''), cls: 'center' },
-      { h: 'ชื่อโครงการ', f: (p) => `<b>${esc(p.title)}</b><div class="xs muted">${esc(p.code || '')}</div>` },
-      { h: 'กลุ่มเป้าหมาย', f: (p) => `${esc(p.target_group || '-')}${p.target_count ? ` <span class="tag">${p.target_count} คน</span>` : ''}` },
+      { h: 'ชื่อโครงการ', f: (p) => `<b>${esc(p.title)}</b>${isCentral() && !S.facility && p.facilities ? `<div class="xs muted">${esc(p.facilities.name)}</div>` : ''}` },
+      { h: 'เป้าหมาย', f: (p) => `${esc(p.target_group || '-')}${p.target_count ? ` <span class="tag">${p.target_count} คน</span>` : ''}` },
       { h: 'ระยะเวลา', f: (p) => `<span class="small">${thDate(p.start_date)} - ${thDate(p.end_date)}</span>` },
-      { h: 'งบประมาณ', f: (p) => money(p.budget), cls: 'right' },
-      { h: 'สถานะ', f: (p) => tag(p.status === 'submitted' ? 'submitted_p' : p.status) }
+      { h: 'งบประมาณ (บาท)', f: (p) => money(p.budget), cls: 'right' },
+      { h: 'สถานะ', f: (p) => tag(p.status === 'submitted' ? 'submitted_p' : p.status) },
+      { h: 'เอกสารโครงการ', f: (p) => exportBtns('project', { xlsx: false, params: { id: p.id } }), cls: 'nowrap' }
     ], rows, { rowAct: 'projectEdit', empty: 'ยังไม่มีโครงการ' });
 }
+
+/** แปลงจำนวนเงินเป็นตัวอักษรไทย (ตรงกับ bahtText_ ฝั่ง server) */
+function bahtText(num) {
+  const n = ['ศูนย์', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+  const u = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน', 'ล้าน'];
+  const read = (s) => {
+    s = s.replace(/^0+/, '');
+    if (!s) return '';
+    if (s.length > 6) return read(s.slice(0, -6)) + 'ล้าน' + read(s.slice(-6));
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const d = +s[i], pos = s.length - i - 1;
+      if (!d) continue;
+      if (pos === 0 && d === 1 && s.length > 1) out += 'เอ็ด';
+      else if (pos === 1 && d === 2) out += 'ยี่';
+      else if (!(pos === 1 && d === 1)) out += n[d];
+      out += u[pos];
+    }
+    return out;
+  };
+  const [b, st] = Math.abs(Number(num || 0)).toFixed(2).split('.');
+  const baht = read(b), satang = read(st);
+  if (!baht && !satang) return 'ศูนย์บาทถ้วน';
+  return (baht ? baht + 'บาท' : '') + (satang ? satang + 'สตางค์' : 'ถ้วน');
+}
+
 function projectDefaults(d) {
   const org = (curFac() || {}).name || '';
-  const y = new Date().getFullYear() + 543 + (new Date().getMonth() >= 9 ? 1 : 0);
+  const y = fiscalYear();
   return {
-    fiscal_year: y, status: 'draft', budget_source: 'กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC)',
+    fiscal_year: y, status: 'draft',
     title: 'โครงการดูแลผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงในชุมชน ประจำปีงบประมาณ ' + y,
     rationale: `ปัจจุบันประเทศไทยเข้าสู่สังคมผู้สูงอายุอย่างสมบูรณ์ ผู้สูงอายุจำนวนหนึ่งมีภาวะพึ่งพิงจากโรคเรื้อรังและความเสื่อมถอยของร่างกาย จำเป็นต้องได้รับการดูแลอย่างต่อเนื่อง
-จากการสำรวจและประเมินความสามารถในการทำกิจวัตรประจำวัน (ADL) ในพื้นที่ ${org} พบผู้สูงอายุ ${num(d.elderly)} คน ประเมินแล้ว ${num(d.assessed)} คน เป็นผู้มีภาวะพึ่งพิงที่เข้าเกณฑ์ ${num(d.ltc_eligible)} คน (ติดบ้าน ${num(d.dep_home)} คน ติดเตียง ${num(d.dep_bed)} คน)
+จากการประเมินความสามารถในการทำกิจวัตรประจำวัน (ADL) ในพื้นที่ ${org} พบผู้สูงอายุ ${num(d.elderly)} คน ประเมินแล้ว ${num(d.assessed)} คน เป็นผู้มีภาวะพึ่งพิงที่เข้าเกณฑ์ ${num(d.ltc_eligible)} คน (ติดบ้าน ${num(d.dep_home)} คน ติดเตียง ${num(d.dep_bed)} คน)
 จึงได้จัดทำโครงการนี้เพื่อให้ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงได้รับบริการดูแลระยะยาวด้านสาธารณสุขตามชุดสิทธิประโยชน์ โดยมี Care Manager และ Caregiver ดูแลตาม Care Plan รายบุคคล`,
     objectives: '1. เพื่อให้ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงได้รับการดูแลตามแผนการดูแลรายบุคคล (Care Plan)\n2. เพื่อป้องกันภาวะแทรกซ้อน เช่น แผลกดทับ ข้อติด และลดการกลับมารักษาซ้ำ\n3. เพื่อส่งเสริมคุณภาพชีวิตของผู้มีภาวะพึ่งพิงและครอบครัว',
     target_group: 'ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิง (ADL ≤ 11 คะแนน)', target_count: d.ltc_eligible,
-    expected_outcomes: '1. ผู้มีภาวะพึ่งพิงได้รับบริการตาม Care Plan ไม่น้อยกว่าร้อยละ 90\n2. ผู้มีภาวะพึ่งพิงไม่เกิดแผลกดทับรายใหม่\n3. ผู้ดูแลและครอบครัวมีความพึงพอใจต่อการให้บริการ',
-    evaluation: '1. ติดตามจากบันทึกการปฏิบัติงานของ Caregiver รายเดือน\n2. ประเมิน ADL ซ้ำทุก 6 เดือน\n3. สรุปผลการดำเนินงานรายไตรมาสเสนอคณะอนุกรรมการ',
+    method: '1. สำรวจและประเมิน ADL ผู้สูงอายุและผู้พิการ จัดกลุ่มตามชุดสิทธิประโยชน์\n2. Care Manager จัดทำ Care Plan รายบุคคลร่วมกับครอบครัว\n3. Caregiver ให้บริการดูแลที่บ้านตาม Care Plan และบันทึกผลการปฏิบัติงาน\n4. ติดตาม ประเมินผล และสรุปผลการดำเนินงานรายงานกองทุน',
+    budget_source: 'ใช้งบประมาณจากกองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC) รายละเอียดดังนี้',
     activities: [
-      { name: 'สำรวจและประเมิน ADL ผู้สูงอายุ/ผู้พิการ', detail: 'คัดกรองกลุ่มเป้าหมายและจัดกลุ่มตามชุดสิทธิประโยชน์', period: 'ต.ค.-พ.ย.', budget: 0 },
-      { name: 'จัดทำ Care Plan รายบุคคล', detail: 'Care Manager จัดทำแผนร่วมกับครอบครัว', period: 'พ.ย.-ธ.ค.', budget: 0 },
-      { name: 'บริการดูแลที่บ้านโดย Caregiver', detail: 'ดูแลตาม Care Plan บันทึกผลพร้อมรูปภาพ', period: 'ตลอดปี', budget: 0 },
-      { name: 'ติดตาม ประเมินผล และสรุปโครงการ', detail: 'ประเมิน ADL ซ้ำ สรุปผลรายงานกองทุน', period: 'ก.ย.', budget: 0 }
-    ]
+      { name: 'ค่าตอบแทนผู้ช่วยเหลือดูแล (Caregiver)', detail: 'ดูแลผู้มีภาวะพึ่งพิงตาม Care Plan', budget: 0 },
+      { name: 'ค่าตอบแทน Care Manager', detail: 'จัดทำและติดตาม Care Plan', budget: 0 },
+      { name: 'ค่าวัสดุอุปกรณ์ในการดูแล', detail: 'ผ้าอ้อมผู้ใหญ่ ที่นอนลม อุปกรณ์ทำแผล ฯลฯ', budget: 0 }
+    ],
+    evaluation: '1. ผู้มีภาวะพึ่งพิงได้รับการเยี่ยมดูแลตาม Care Plan ไม่น้อยกว่าร้อยละ 90\n2. ผู้มีภาวะพึ่งพิงไม่เกิดแผลกดทับรายใหม่\n3. ประเมิน ADL ซ้ำทุก 6 เดือน คะแนนคงที่หรือดีขึ้น',
+    start_date: `${y - 544}-10-01`, end_date: `${y - 543}-09-30`,
+    expected_outcomes: '1. ผู้มีภาวะพึ่งพิงได้รับบริการตาม Care Plan อย่างต่อเนื่อง\n2. ลดภาวะแทรกซ้อนและการกลับมารักษาซ้ำ\n3. ผู้ดูแลและครอบครัวมีความพึงพอใจต่อการให้บริการ'
   };
 }
+
+/** ผู้ลงนามในโครงการ ดึงจากข้อมูลสถานบริการ (ตั้งค่า → ข้อมูลสถานบริการ) */
+function signerPreview(fac) {
+  if (!fac) return '<div class="hint">เลือกสถานบริการก่อน เพื่อดึงรายชื่อผู้ลงนาม</div>';
+  const row = (role, name, pos) => `<div class="sign-blk"><div>ลงชื่อ<span class="dots"></span>${esc(role)}</div>
+    <div>(${name ? esc(name) : '<span class="muted">ยังไม่ได้ระบุชื่อ</span>'})</div><div>ตำแหน่ง ${pos ? esc(pos) : '<span class="muted">-</span>'}</div></div>`;
+  return row('ผู้เขียนเสนอโครงการ', fac.cm_name, fac.cm_position) +
+    row('ผู้เสนอโครงการ', fac.director_name, fac.director_position) +
+    row('ผู้เห็นชอบโครงการ', fac.center_chair, fac.center_chair_position) +
+    row('ผู้อนุมัติโครงการ', fac.approver_name, fac.approver_position) +
+    `<div class="xs muted mt">ชื่อและตำแหน่งดึงจาก ตั้งค่า → ข้อมูลสถานบริการ (${esc(fac.name)})</div>`;
+}
+
 H.projectEdit = async (d) => {
   let p;
   if (d.id) p = await api('projects.get', { id: d.id });
   else p = projectDefaults(await api('dashboard', {}));
   const ro = !isStaff();
+  const fac = S.facilities.find((f) => f.id === (p.facility_id || curFacId())) || null;
   const ben = (p.beneficiaries || []).map((b) => ({ person_id: b.id, label: fname(b), moo: b.moo }));
+  const sec = (no, title) => `<h3 class="proj-h">${no}. ${title}</h3>`;
   const m = openModal({ title: p.id ? 'โครงการ' : 'จัดทำโครงการใหม่', wide: true, body: `
-    ${formHtml([
-      { k: 'title', label: 'ชื่อโครงการ', req: true, span: true },
-      { k: 'fiscal_year', label: 'ปีงบประมาณ (พ.ศ.)', type: 'number' }, { k: 'code', label: 'รหัสโครงการ' },
-      { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['draft', 'ร่าง'], ['submitted', 'เสนอแล้ว'], ['approved', 'อนุมัติ'], ['running', 'ดำเนินการ'], ['done', 'เสร็จสิ้น']] },
-      { k: 'rationale', label: 'หลักการและเหตุผล', type: 'textarea', rows: 6, span: true },
-      { k: 'objectives', label: 'วัตถุประสงค์', type: 'textarea', rows: 4, span: true },
-      { k: 'target_group', label: 'กลุ่มเป้าหมาย', span: true }, { k: 'target_count', label: 'จำนวนเป้าหมาย (คน)', type: 'number' },
-      { k: 'location', label: 'สถานที่ดำเนินการ', def: (curFac() || {}).name }, { k: 'responsible', label: 'ผู้รับผิดชอบโครงการ' },
-      { k: 'start_date', label: 'วันเริ่มโครงการ', type: 'date' }, { k: 'end_date', label: 'วันสิ้นสุดโครงการ', type: 'date' },
-      { k: 'budget_source', label: 'แหล่งงบประมาณ' },
-      { k: 'expected_outcomes', label: 'ผลที่คาดว่าจะได้รับ', type: 'textarea', rows: 4, span: true },
-      { k: 'evaluation', label: 'การติดตามและประเมินผล', type: 'textarea', rows: 3, span: true }
-    ], p, 'c3')}
-    <div class="row mt mb"><h3 class="grow">กิจกรรมและงบประมาณ</h3>${ro ? '' : '<button class="btn btn-o btn-sm" data-addact>+ เพิ่มกิจกรรม</button>'}</div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th style="min-width:200px">กิจกรรม</th><th style="min-width:200px">รายละเอียด</th><th>ระยะเวลา</th><th>งบประมาณ</th><th></th></tr></thead><tbody data-acts></tbody>
-      <tfoot><tr><td colspan="3" class="right"><b>รวมงบประมาณ</b></td><td class="right"><b data-sum></b></td><td></td></tr></tfoot></table></div>
-    <div class="row mt mb"><h3 class="grow">กลุ่มเป้าหมาย (รายชื่อแนบท้ายโครงการ) <span class="tag" data-bencount></span></h3>
-      ${ro ? '' : '<button class="btn btn-g btn-sm" data-loadben>ดึงรายชื่อผู้เข้าเกณฑ์ LTC</button>'}</div>
-    <div data-ben class="small"></div>`,
+    <div class="form c3 mb">
+      ${fieldHtml({ k: 'fiscal_year', label: 'ปีงบประมาณ (พ.ศ.)', type: 'number' }, p.fiscal_year)}
+      ${fieldHtml({ k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['draft', 'ร่าง'], ['submitted', 'เสนอแล้ว'], ['approved', 'อนุมัติ'], ['running', 'ดำเนินการ'], ['done', 'เสร็จสิ้น']] }, p.status)}
+      <div class="f"><label>สถานบริการ</label><b style="padding:8px 0">${esc(fac ? fac.name : '-')}</b></div>
+    </div>
+    ${sec(1, 'ชื่อโครงการ')}${fieldHtml({ k: 'title', label: '', req: true, span: true }, p.title)}
+    ${sec(2, 'หลักการและเหตุผล')}${fieldHtml({ k: 'rationale', label: '', type: 'textarea', rows: 6 }, p.rationale)}
+    ${sec(3, 'วัตถุประสงค์')}${fieldHtml({ k: 'objectives', label: '', type: 'textarea', rows: 4 }, p.objectives)}
+    ${sec(4, 'เป้าหมาย')}
+    <div class="form">${fieldHtml({ k: 'target_group', label: 'กลุ่มเป้าหมาย', span: true }, p.target_group)}
+      ${fieldHtml({ k: 'target_count', label: 'จำนวน (คน)', type: 'number' }, p.target_count)}
+      <div class="f"><label>รายชื่อแนบท้าย <span class="tag" data-bencount></span></label>
+        ${ro ? '' : '<button class="btn btn-g btn-sm" type="button" data-loadben style="align-self:flex-start">ดึงรายชื่อผู้เข้าเกณฑ์ LTC</button>'}</div></div>
+    <div data-ben class="small mt"></div>
+    ${sec(5, 'วิธีดำเนินงาน')}${fieldHtml({ k: 'method', label: '', type: 'textarea', rows: 5 }, p.method)}
+    ${sec(6, 'งบประมาณ')}${fieldHtml({ k: 'budget_source', label: '', type: 'textarea', rows: 2, ph: 'เช่น ใช้งบประมาณจากกองทุน LTC ... รายละเอียดดังนี้' }, p.budget_source)}
+    <div class="row mt mb">${ro ? '' : '<button class="btn btn-o btn-sm" type="button" data-addact>+ เพิ่มกิจกรรม</button>'}</div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:44px" class="center">ที่</th><th style="min-width:220px">รายการ</th><th style="min-width:220px">รายละเอียด</th><th class="right" style="width:150px">งบประมาณ (บาท)</th><th style="width:36px"></th></tr></thead>
+      <tbody data-acts></tbody>
+      <tfoot><tr style="background:#f3f4ee"><td></td><td colspan="2" class="right"><b>รวมเป็นเงินทั้งสิ้น (อัตโนมัติ)</b></td><td class="right"><b data-sum></b> บาท</td><td></td></tr></tfoot></table></div>
+    <div class="baht-text" data-baht></div>
+    ${sec(7, 'เกณฑ์การประเมิน')}${fieldHtml({ k: 'evaluation', label: '', type: 'textarea', rows: 4 }, p.evaluation)}
+    ${sec(8, 'ระยะเวลาดำเนินการ')}
+    <div class="form">${fieldHtml({ k: 'start_date', label: 'ตั้งแต่วันที่', type: 'date' }, p.start_date)}${fieldHtml({ k: 'end_date', label: 'ถึงวันที่', type: 'date' }, p.end_date)}</div>
+    ${sec(9, 'ผลที่คาดว่าจะได้รับ')}${fieldHtml({ k: 'expected_outcomes', label: '', type: 'textarea', rows: 4 }, p.expected_outcomes)}
+    ${sec(10, 'ผู้เสนอโครงการ')}<div class="card" style="background:#fafaf6">${signerPreview(fac)}</div>`,
     foot: `${p.id ? exportBtns('project', { xlsx: false, params: { id: p.id } }) : ''}<span class="grow"></span>
       ${p.id && !ro ? '<button class="btn btn-d" data-del>ลบ</button>' : ''}<button class="btn btn-o" data-act="closeModal">ปิด</button>${ro ? '' : '<button class="btn btn-p" data-save>บันทึกโครงการ</button>'}` });
+
+  // ----- 6. ตารางกิจกรรม: รายการ / รายละเอียด / งบประมาณ -----
   const tb = $('[data-acts]', m);
-  const actRow = (a) => `<tr><td><input type="text" data-k="name" value="${esc(a.name || '')}"></td><td><input type="text" data-k="detail" value="${esc(a.detail || '')}"></td>
-    <td><input type="text" data-k="period" value="${esc(a.period || '')}" style="width:110px"></td><td><input type="number" data-k="budget" min="0" step="0.01" value="${a.budget || 0}" style="width:120px"></td>
-    <td><button class="btn-x" data-rm>✕</button></td></tr>`;
-  const sum = () => { $('[data-sum]', m).textContent = money($$('[data-k=budget]', tb).reduce((s, i) => s + Number(i.value || 0), 0)); };
+  const actRow = (a) => `<tr><td class="center" data-no></td><td><input type="text" data-k="name" value="${esc(a.name || '')}" placeholder="รายการ" ${ro ? 'disabled' : ''}></td>
+    <td><input type="text" data-k="detail" value="${esc(a.detail || '')}" placeholder="รายละเอียด" ${ro ? 'disabled' : ''}></td>
+    <td><input type="number" data-k="budget" min="0" step="0.01" value="${a.budget || 0}" style="text-align:right" ${ro ? 'disabled' : ''}></td>
+    <td>${ro ? '' : '<button class="btn-x" type="button" data-rm title="ลบรายการ">✕</button>'}</td></tr>`;
+  const sum = () => {
+    $$('tr', tb).forEach((tr, i) => { $('[data-no]', tr).textContent = i + 1; });
+    const total = $$('[data-k=budget]', tb).reduce((s, i) => s + Number(i.value || 0), 0);
+    $('[data-sum]', m).textContent = money(total);
+    $('[data-baht]', m).textContent = `รวมเป็นเงินทั้งสิ้น ${money(total)} บาท (${bahtText(total)})`;
+  };
   tb.innerHTML = (p.activities || []).map(actRow).join(''); sum();
   tb.addEventListener('input', sum);
   tb.addEventListener('click', (e) => { if (e.target.closest('[data-rm]')) { e.target.closest('tr').remove(); sum(); } });
-  const addA = $('[data-addact]', m); if (addA) addA.onclick = () => { tb.insertAdjacentHTML('beforeend', actRow({})); };
+  const addA = $('[data-addact]', m);
+  if (addA) addA.onclick = () => { tb.insertAdjacentHTML('beforeend', actRow({})); sum(); $$('[data-k=name]', tb).pop().focus(); };
 
+  // ----- 4. รายชื่อกลุ่มเป้าหมาย (แนบท้าย) -----
   let selected = new Set(ben.map((b) => b.person_id));
   let list = ben;
   const renderBen = () => {
     $('[data-bencount]', m).textContent = `${selected.size} คน`;
-    $('[data-ben]', m).innerHTML = list.length ? `<label class="chk mb"><input type="checkbox" data-allben ${selected.size === list.length ? 'checked' : ''}> เลือกทั้งหมด</label>
-      <div class="grid g3" style="gap:4px 14px;max-height:260px;overflow:auto">${list.map((b) => `<label class="chk"><input type="checkbox" data-ben="${b.person_id}" ${selected.has(b.person_id) ? 'checked' : ''} ${ro ? 'disabled' : ''}>
-      ${esc(b.label)} <span class="xs muted">หมู่ ${esc(b.moo || '-')}${b.group ? ' · กลุ่ม ' + b.group : ''}</span></label>`).join('')}</div>` : '<span class="muted">ยังไม่ได้เลือกกลุ่มเป้าหมาย</span>';
+    $('[data-ben]', m).innerHTML = list.length ? `<label class="chk mb"><input type="checkbox" data-allben ${selected.size === list.length ? 'checked' : ''} ${ro ? 'disabled' : ''}> เลือกทั้งหมด</label>
+      <div class="grid g3" style="gap:4px 14px;max-height:220px;overflow:auto">${list.map((b) => `<label class="chk"><input type="checkbox" data-ben="${b.person_id}" ${selected.has(b.person_id) ? 'checked' : ''} ${ro ? 'disabled' : ''}>
+      ${esc(b.label)} <span class="xs muted">หมู่ ${esc(b.moo || '-')}${b.group ? ' · กลุ่ม ' + b.group : ''}</span></label>`).join('')}</div>` : '';
   };
   renderBen();
   $('[data-ben]', m).addEventListener('change', (e) => {
@@ -1516,13 +1577,17 @@ H.projectEdit = async (d) => {
     el.forEach((x) => selected.add(x.person_id));
     renderBen(); $('[name=target_count]', m).value = selected.size;
   });
+
   const sv = $('[data-save]', m);
   if (sv) sv.onclick = run(async () => {
     validate(m);
     const f = readForm(m);
-    Object.keys(f).filter((k) => !['title', 'fiscal_year', 'code', 'status', 'rationale', 'objectives', 'target_group', 'target_count', 'location', 'responsible', 'start_date', 'end_date', 'budget_source', 'expected_outcomes', 'evaluation'].includes(k)).forEach((k) => delete f[k]);
+    const keep = ['title', 'fiscal_year', 'status', 'rationale', 'objectives', 'target_group', 'target_count', 'method', 'budget_source',
+      'start_date', 'end_date', 'expected_outcomes', 'evaluation'];
+    Object.keys(f).filter((k) => !keep.includes(k)).forEach((k) => delete f[k]);
     f.fiscal_year = f.fiscal_year ? Number(f.fiscal_year) : null; f.target_count = f.target_count ? Number(f.target_count) : null;
-    f.activities = $$('tr', tb).map((tr) => { const o = Object.fromEntries($$('[data-k]', tr).map((i) => [i.dataset.k, i.value.trim()])); o.budget = Number(o.budget || 0); return o; });
+    f.activities = $$('tr', tb).map((tr) => { const o = Object.fromEntries($$('[data-k]', tr).map((i) => [i.dataset.k, i.value.trim()])); o.budget = Number(o.budget || 0); return o; })
+      .filter((a) => a.name);
     const saved = await api('projects.save', { project: Object.assign(f, { id: p.id }), beneficiary_ids: Array.from(selected) });
     closeModal(m); toast('บันทึกโครงการแล้ว');
     if (S.view === 'projects') refresh();
@@ -1571,9 +1636,10 @@ H.repExport = (d, b) => {
 const FAC_FIELDS = [
   { k: 'name', label: 'ชื่อสถานบริการ', span: true, req: true },
   { k: 'cm_name', label: 'ชื่อ-สกุล CM' }, { k: 'cm_position', label: 'ตำแหน่ง CM' },
-  { k: 'director_name', label: 'ชื่อ-สกุล ผอ.รพ.สต.' },
+  { k: 'director_name', label: 'ชื่อ-สกุล ผอ.รพ.สต.' }, { k: 'director_position', label: 'ตำแหน่ง ผอ.รพ.สต.', ph: 'เช่น ผู้อำนวยการโรงพยาบาลส่งเสริมสุขภาพตำบล...' },
   { k: 'fund_name', label: 'ชื่อกองทุน', span: true, ph: 'เช่น กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC) ...' },
-  { k: 'center_chair', label: 'ชื่อ-สกุล ประธานศูนย์ฯ' }, { k: 'lao_name', label: 'ชื่อ อปท.', ph: 'เช่น อบต. / เทศบาลตำบล ...' },
+  { k: 'center_chair', label: 'ชื่อ-สกุล ประธานศูนย์ฯ' }, { k: 'center_chair_position', label: 'ตำแหน่ง ประธานศูนย์ฯ', ph: 'เช่น ประธานศูนย์พัฒนาคุณภาพชีวิตผู้สูงอายุ...' },
+  { k: 'lao_name', label: 'ชื่อ อปท.', ph: 'เช่น อบต. / เทศบาลตำบล ...' },
   { k: 'address', label: 'ที่อยู่', span: true },
   { k: 'subdistrict', label: 'ตำบล' }, { k: 'district', label: 'อำเภอ' }, { k: 'province', label: 'จังหวัด' },
   { k: 'phone', label: 'โทรศัพท์', type: 'tel' },

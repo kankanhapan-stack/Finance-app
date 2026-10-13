@@ -337,6 +337,11 @@ begin
   end loop;
 end $$;
 
+-- คอลัมน์เพิ่มเติม (v3): ตำแหน่งผู้ลงนาม และวิธีดำเนินงานของโครงการ
+alter table facilities add column if not exists director_position     text;  -- ตำแหน่ง ผอ.รพ.สต.
+alter table facilities add column if not exists center_chair_position text;  -- ตำแหน่ง ประธานศูนย์ฯ
+alter table projects   add column if not exists method                text;  -- วิธีดำเนินงาน
+
 -- ย้ายข้อมูลเดิม (ก่อนรองรับหลายสถานบริการ) เข้าสถานบริการแรก
 do $$
 declare fid uuid;

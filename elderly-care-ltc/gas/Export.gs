@@ -186,7 +186,9 @@ const FONT = 'Sarabun';
 function newDoc_(title, landscape) {
   const doc = DocumentApp.create('ltc-export-' + title.slice(0, 40) + '-' + Date.now());
   const body = doc.getBody();
+  // กระดาษ A4 (595 x 842 pt)
   if (landscape) body.setPageWidth(842).setPageHeight(595);
+  else body.setPageWidth(595).setPageHeight(842);
   body.setMarginTop(40).setMarginBottom(40).setMarginLeft(54).setMarginRight(40);
   return doc;
 }
@@ -393,42 +395,67 @@ function visitDoc_(id, user) {
   return doc;
 }
 
-// ---------- เอกสารโครงการ ----------
+// ---------- เอกสารโครงการ (A4, 10 หัวข้อ + ลงลายมือชื่อ 4 ระดับ) ----------
+
+/** บล็อกลงลายมือชื่อ: ลงชื่อ......บทบาท / (ชื่อ-สกุล) / ตำแหน่ง */
+function signBlock_(body, role, name, position) {
+  const lines = [
+    'ลงชื่อ.................................................' + role,
+    '(' + (name || '.................................................') + ')',
+    'ตำแหน่ง ' + (position || '.................................................')
+  ];
+  para_(body, '', { after: 0, size: 10 });
+  lines.forEach(function (t, i) {
+    const p = para_(body, t, { after: 0, before: i === 0 ? 14 : 0 });
+    p.setIndentStart(170).setIndentFirstLine(170).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  });
+}
+
 function projectDoc_(id, user) {
   const pr = projectsGet_({ id: id }, user);
   const org = getFacility_(pr.facility_id);
   const doc = newDoc_('project', false);
   const body = doc.getBody();
-  docHeader_(body, 'โครงการ' + pr.title.replace(/^โครงการ/, ''), org.name);
+  body.setMarginTop(57).setMarginBottom(57).setMarginLeft(85).setMarginRight(57); // 2 / 2 / 3 / 2 ซม.
+  docHeader_(body, 'โครงการ' + String(pr.title || '').replace(/^โครงการ\s*/, ''), org.name);
   if (pr.fiscal_year) para_(body, 'ประจำปีงบประมาณ ' + pr.fiscal_year, { center: true, after: 8 });
 
-  let n = 1;
-  function sec(title, text) {
-    heading_(body, (n++) + '. ' + title);
+  function sec(no, title, text) {
+    heading_(body, no + '. ' + title);
     String(text || '-').split(/\n/).forEach(function (line) { para_(body, line, { indent: true }); });
   }
-  sec('ชื่อโครงการ', pr.title);
-  sec('หลักการและเหตุผล', pr.rationale);
-  sec('วัตถุประสงค์', pr.objectives);
-  sec('กลุ่มเป้าหมาย', (pr.target_group || '-') + (pr.target_count ? ' จำนวน ' + pr.target_count + ' คน' : ''));
-  sec('ระยะเวลาดำเนินการ', thDate_(pr.start_date, true) + ' ถึง ' + thDate_(pr.end_date, true));
-  sec('สถานที่ดำเนินการ', pr.location);
+  sec(1, 'ชื่อโครงการ', pr.title);
+  sec(2, 'หลักการและเหตุผล', pr.rationale);
+  sec(3, 'วัตถุประสงค์', pr.objectives);
+  sec(4, 'เป้าหมาย', (pr.target_group || '-') + (pr.target_count ? ' จำนวน ' + pr.target_count + ' คน' : ''));
+  sec(5, 'วิธีดำเนินงาน', pr.method);
 
-  heading_(body, (n++) + '. วิธีดำเนินการ / กิจกรรม');
+  heading_(body, '6. งบประมาณ');
+  if (pr.budget_source) String(pr.budget_source).split(/\n/).forEach(function (line) { para_(body, line, { indent: true }); });
   const acts = pr.activities || [];
-  if (acts.length) {
-    const rows = acts.map(function (a, i) { return [i + 1, a.name, a.detail || '', a.period || '', money_(a.budget)]; });
-    rows.push(['', 'รวม', '', '', money_(pr.budget)]);
-    table_(body, ['ที่', 'กิจกรรม', 'รายละเอียด', 'ระยะเวลา', 'งบประมาณ (บาท)'], rows, { size: 12 });
-  } else para_(body, '-', { indent: true });
+  const rows = acts.map(function (a, i) { return [i + 1, a.name || '', a.detail || '', money_(a.budget)]; });
+  rows.push(['', 'รวมเป็นเงินทั้งสิ้น', '', money_(pr.budget)]);
+  const t = table_(body, ['ที่', 'รายการ', 'รายละเอียด', 'งบประมาณ (บาท)'], rows, { size: 13 });
+  const last = t.getRow(t.getNumRows() - 1);
+  last.editAsText().setBold(true);
+  for (let r = 1; r < t.getNumRows(); r++) {
+    t.getRow(r).getCell(0).getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    t.getRow(r).getCell(3).getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  }
+  t.setColumnWidth(0, 30).setColumnWidth(3, 95);
+  para_(body, 'รวมเป็นเงินทั้งสิ้น ' + money_(pr.budget) + ' บาท (' + bahtText_(pr.budget) + ')', { bold: true, before: 4, indent: true });
+  para_(body, '(ทุกรายการถัวเฉลี่ยจ่ายได้ตามที่จ่ายจริง)', { size: 13, indent: true });
 
-  sec('งบประมาณ', 'จาก ' + (pr.budget_source || '-') + ' จำนวน ' + money_(pr.budget) + ' บาท (' + bahtText_(pr.budget) + ')\n(ทุกรายการถัวเฉลี่ยจ่ายได้ตามที่จ่ายจริง)');
-  sec('ผลที่คาดว่าจะได้รับ', pr.expected_outcomes);
-  sec('การติดตามและประเมินผล', pr.evaluation);
-  sec('ผู้รับผิดชอบโครงการ', pr.responsible);
+  sec(7, 'เกณฑ์การประเมิน', pr.evaluation);
+  sec(8, 'ระยะเวลาดำเนินการ', pr.start_date || pr.end_date
+    ? 'ตั้งแต่ ' + thDate_(pr.start_date, true) + ' ถึง ' + thDate_(pr.end_date, true) : '-');
+  sec(9, 'ผลที่คาดว่าจะได้รับ', pr.expected_outcomes);
 
-  signatures_(body, ['ผู้เสนอโครงการ', 'ผู้เห็นชอบโครงการ']);
-  signatures_(body, ['ผู้อนุมัติโครงการ' + (org.approver_name ? '\n' + org.approver_name : '') + '\n' + (org.approver_position || '')]);
+  heading_(body, '10. ผู้เสนอโครงการ');
+  signBlock_(body, 'ผู้เขียนเสนอโครงการ', org.cm_name, org.cm_position);
+  signBlock_(body, 'ผู้เสนอโครงการ', org.director_name, org.director_position);
+  signBlock_(body, 'ผู้เห็นชอบโครงการ', org.center_chair, org.center_chair_position);
+  signBlock_(body, 'ผู้อนุมัติโครงการ', org.approver_name, org.approver_position);
 
   if (pr.beneficiaries.length) {
     body.appendPageBreak();

@@ -683,7 +683,7 @@ function payStatus_(table) {
 function projectsSave_(p, user) {
   const pr = p.project || {};
   if (!pr.title) throw new Error('กรุณากรอกชื่อโครงการ');
-  const keys = ['id', 'fiscal_year', 'code', 'title', 'rationale', 'objectives', 'target_group', 'target_count', 'location',
+  const keys = ['id', 'fiscal_year', 'code', 'title', 'rationale', 'objectives', 'target_group', 'target_count', 'method', 'location',
     'start_date', 'end_date', 'budget', 'budget_source', 'activities', 'expected_outcomes', 'evaluation', 'responsible', 'status'];
   const row = {};
   keys.forEach(function (k) { if (pr[k] !== undefined) row[k] = pr[k]; });
@@ -721,7 +721,8 @@ function projectsEligible_(p, user) {
 
 // ======================= Facilities =======================
 
-const FACILITY_COLS = ['code', 'name', 'cm_name', 'cm_position', 'director_name', 'fund_name', 'center_chair', 'lao_name',
+const FACILITY_COLS = ['code', 'name', 'cm_name', 'cm_position', 'director_name', 'director_position', 'fund_name', 'center_chair',
+  'center_chair_position', 'lao_name',
   'address', 'subdistrict', 'district', 'province', 'phone', 'approver_name', 'approver_position', 'active'];
 
 function facilitiesList_(p, user) {
