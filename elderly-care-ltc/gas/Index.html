@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ระบบดูแลผู้สูงอายุและผู้มีภาวะพึ่งพิง</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Styles'); ?>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- ===== Login ===== -->
+  <div id="login" hidden>
+    <form class="login-card" id="loginForm" autocomplete="on" action="javascript:void(0)" onsubmit="return false;">
+      <div class="login-logo">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg>
+      </div>
+      <h1>ระบบดูแลผู้สูงอายุและผู้มีภาวะพึ่งพิง</h1>
+      <p class="muted small" style="margin:4px 0 20px">Long-Term Care Management · เข้าสู่ระบบเพื่อใช้งาน</p>
+      <div class="f mb"><label>ชื่อผู้ใช้</label><input type="text" name="username" autocomplete="username" required></div>
+      <div class="f mb"><label>รหัสผ่าน</label><input type="password" name="password" autocomplete="current-password" required></div>
+      <div id="loginErr" class="warn mb" hidden></div>
+      <button class="btn btn-p" style="width:100%;justify-content:center;padding:11px" type="submit">เข้าสู่ระบบ</button>
+      <button class="btn btn-o" style="width:100%;justify-content:center;margin-top:10px" type="button" data-act="hideLogin">← กลับหน้า Dashboard</button>
+    </form>
+  </div>
+
+  <!-- ===== App shell ===== -->
+  <div id="app" class="shell">
+    <aside class="side" id="side">
+      <div class="brand">
+        <div class="brand-mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></div>
+        <div><b>LTC Dashboard</b><small id="orgName">ดูแลผู้มีภาวะพึ่งพิง</small></div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+    </aside>
+    <main class="main">
+      <header class="top">
+        <button class="btn btn-o btn-sm menu-btn" data-act="toggleMenu" aria-label="เมนู">☰</button>
+        <h2 id="viewTitle">Dashboard</h2>
+        <select id="facSel" class="fac-sel" title="สถานบริการที่กำลังทำงาน" hidden></select>
+        <div class="user-chip" id="userChip" hidden><div class="avatar" id="avatar">A</div><span id="userName"></span></div>
+        <button class="btn btn-o btn-sm" id="btnLogout" data-act="logout" hidden>ออกจากระบบ</button>
+        <button class="btn btn-p btn-sm" id="btnLogin" data-act="showLogin">เข้าสู่ระบบ</button>
+      </header>
+      <section id="view"></section>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toast"></div>
+  <div id="busy" hidden></div>
+
+  <script>
+    window.addEventListener('error', function (e) {
+      var el = document.getElementById('loginErr');
+      if (el && !window.__ltcReady) { el.textContent = 'เกิดข้อผิดพลาดของหน้าเว็บ: ' + (e.message || e.error); el.hidden = false; document.getElementById('login').hidden = false; }
+      if (window.console) console.error(e.error || e.message);
+    });
+  </script>
+  <?!= includeScript('App'); ?>
+  <script>
+    if (!window.__ltcReady) {
+      var el = document.getElementById('loginErr');
+      el.textContent = 'โหลดสคริปต์ของระบบไม่สำเร็จ กรุณากด F12 ดู Console แล้วแจ้งข้อความ error';
+      el.hidden = false;
+      document.getElementById('login').hidden = false;
+    }
+  </script>
+</body>
+</html>
