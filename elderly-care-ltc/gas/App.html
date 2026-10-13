@@ -1,0 +1,1553 @@
+<script>
+'use strict';
+/* =====================================================================
+ *  LTC Dashboard — Front-end (Vanilla JS SPA บน HtmlService)
+ * ===================================================================== */
+
+const S = { token: null, user: null, settings: {}, view: 'dashboard', state: {}, charts: [], loaders: {}, exportParams: null };
+const V = document.getElementById('view');
+const ALL = ['admin', 'cm', 'cg', 'viewer'], READ = ['admin', 'cm', 'viewer'], STAFF = ['admin', 'cm'];
+
+// ---------------- utils ----------------
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+const can = (roles) => S.user && roles.includes(S.user.role);
+const isStaff = () => can(STAFF);
+const TH_M = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const TH_ML = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+function pad(n) { return String(n).padStart(2, '0'); }
+function today() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function curMonth() { return today().slice(0, 7); }
+function thDate(s) { if (!s) return '-'; const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${+m[3]} ${TH_M[+m[2] - 1]} ${String(+m[1] + 543).slice(2)}` : esc(s); }
+function thMonth(p) { return p ? `${TH_ML[+p.slice(5, 7) - 1]} ${+p.slice(0, 4) + 543}` : ''; }
+function money(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function num(n) { return Number(n || 0).toLocaleString('th-TH'); }
+function age(b) { if (!b) return ''; const d = new Date(b), t = new Date(); let a = t.getFullYear() - d.getFullYear(); if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) a--; return a; }
+function fname(p) { return p ? `${p.prefix || ''}${p.first_name || ''} ${p.last_name || ''}`.trim() : '-'; }
+function addYear(d) { const x = new Date(d); x.setFullYear(x.getFullYear() + 1); x.setDate(x.getDate() - 1); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`; }
+
+const STATUS = {
+  draft: ['ร่าง', ''], approved: ['อนุมัติแล้ว', 't-blue'], active: ['ดำเนินการ', 't-green'], closed: ['ปิดแผน', ''],
+  submitted: ['รอตรวจสอบ', 't-amber'], verified: ['ตรวจแล้ว', 't-green'], rejected: ['ส่งกลับแก้ไข', 't-red'], paid: ['จ่ายแล้ว', 't-green'],
+  submitted_p: ['เสนอแล้ว', 't-amber'], running: ['ดำเนินการ', 't-green'], done: ['เสร็จสิ้น', 't-blue'],
+  alive: ['มีชีวิต', 't-green'], dead: ['เสียชีวิต', 't-red'], moved: ['ย้ายออก', ''], active_s: ['ปฏิบัติงาน', 't-green'], inactive: ['พ้นสภาพ', '']
+};
+function tag(st, alt) { const s = STATUS[alt || st] || [st, '']; return `<span class="tag ${s[1]}">${esc(s[0])}</span>`; }
+function levelTag(l) { const c = { 'ติดเตียง': 't-red', 'ติดบ้าน': 't-amber', 'ติดสังคม': 't-green' }[l] || ''; return l ? `<span class="tag ${c}">${esc(l)}</span>` : '<span class="muted">-</span>'; }
+function groupTag(g) { return g ? `<span class="tag t-gold">กลุ่ม ${g}</span>` : '<span class="muted xs">ไม่เข้าเกณฑ์</span>'; }
+
+// ---------------- icons ----------------
+const ICONS = {
+  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
+  heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  wallet: '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
+};
+const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
+
+// ---------------- server bridge ----------------
+let busyN = 0;
+function busy(on) { busyN = Math.max(0, busyN + (on ? 1 : -1)); $('#busy').hidden = busyN === 0; }
+function gs(fn, ...args) {
+  return new Promise((res, rej) => google.script.run
+    .withSuccessHandler(res)
+    .withFailureHandler((e) => rej(e instanceof Error ? e : new Error(String(e))))[fn](...args));
+}
+async function api(action, payload, quiet) {
+  if (!quiet) busy(true);
+  try {
+    const r = await gs('api', S.token, action, payload || {});
+    if (!r || !r.ok) {
+      if (r && r.code === 'AUTH') doLogout(true);
+      throw new Error(r ? r.error : 'เกิดข้อผิดพลาด');
+    }
+    return r.data;
+  } finally { if (!quiet) busy(false); }
+}
+function toast(msg, err) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = msg;
+  $('#toast').appendChild(t);
+  setTimeout(() => t.remove(), err ? 6000 : 3000);
+}
+/** ห่อ handler ให้แสดง error เป็น toast */
+const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { console.error(e); toast(e.message || String(e), true); } };
+
+// ---------------- modal ----------------
+function openModal({ title, body, foot, wide }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-bg';
+  wrap.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">
+    <div class="modal-h"><h3>${esc(title)}</h3><button class="btn-x" data-act="closeModal" aria-label="ปิด">✕</button></div>
+    <div class="modal-b">${body}</div>${foot ? `<div class="modal-f">${foot}</div>` : ''}</div>`;
+  $('#modalRoot').appendChild(wrap);
+  return wrap;
+}
+function closeModal(el) { const m = el ? el.closest('.modal-bg') : $('#modalRoot').lastElementChild; if (m) m.remove(); }
+function askConfirm(msg, okLabel = 'ยืนยัน', danger) {
+  return new Promise((res) => {
+    const m = openModal({ title: 'ยืนยันการทำรายการ', body: `<p style="margin:0">${esc(msg)}</p>`,
+      foot: `<button class="btn btn-o" data-no>ยกเลิก</button><button class="btn ${danger ? 'btn-d' : 'btn-p'}" data-yes>${esc(okLabel)}</button>` });
+    $('[data-yes]', m).onclick = () => { closeModal(m); res(true); };
+    $('[data-no]', m).onclick = () => { closeModal(m); res(false); };
+  });
+}
+function askText(title, label, required = true) {
+  return new Promise((res) => {
+    const m = openModal({ title, body: `<div class="f"><label>${esc(label)}</label><textarea rows="3" data-txt></textarea></div>`,
+      foot: `<button class="btn btn-o" data-no>ยกเลิก</button><button class="btn btn-p" data-yes>ตกลง</button>` });
+    $('[data-yes]', m).onclick = () => { const v = $('[data-txt]', m).value.trim(); if (required && !v) return toast('กรุณากรอกข้อมูล', true); closeModal(m); res(v); };
+    $('[data-no]', m).onclick = () => { closeModal(m); res(null); };
+  });
+}
+
+// ---------------- forms ----------------
+function opts(options, v) {
+  return options.map((o) => {
+    const [val, lab] = Array.isArray(o) ? o : [o, o];
+    return `<option value="${esc(val)}" ${String(val) === String(v == null ? '' : v) ? 'selected' : ''}>${esc(lab)}</option>`;
+  }).join('');
+}
+function fieldHtml(f, v) {
+  const req = f.req ? '<span class="req">*</span>' : '';
+  const cls = `f ${f.span ? 'span' : ''}`;
+  let input;
+  switch (f.type) {
+    case 'select': input = `<select name="${f.k}" ${f.req ? 'required' : ''} ${f.attrs || ''}>${f.blank === false ? '' : '<option value="">— เลือก —</option>'}${opts(f.options || [], v)}</select>`; break;
+    case 'textarea': input = `<textarea name="${f.k}" rows="${f.rows || 3}" ${f.req ? 'required' : ''} placeholder="${esc(f.ph || '')}">${esc(v)}</textarea>`; break;
+    case 'checkbox': return `<div class="${cls}"><label class="chk"><input type="checkbox" name="${f.k}" ${v === true || v === 'true' ? 'checked' : ''}> ${esc(f.label)}</label></div>`;
+    case 'multi': {
+      const cur = String(v || '').split(',').map((s) => s.trim());
+      input = `<div class="row" style="gap:6px 16px">${f.options.map((o) => `<label class="chk"><input type="checkbox" name="${f.k}" value="${esc(o)}" data-multi ${cur.includes(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div>`;
+      break;
+    }
+    case 'person': input = personPicker(f.k, v, f.display); break;
+    default: input = `<input type="${f.type || 'text'}" name="${f.k}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.attrs || ''} placeholder="${esc(f.ph || '')}">`;
+  }
+  return `<div class="${cls}"><label>${esc(f.label)} ${req}</label>${input}${f.hint ? `<div class="xs muted">${esc(f.hint)}</div>` : ''}</div>`;
+}
+function formHtml(fields, data = {}, cls = '') {
+  return `<div class="form ${cls}">${fields.map((f) => fieldHtml(f, data[f.k] != null ? data[f.k] : (f.def != null ? f.def : ''))).join('')}</div>`;
+}
+function readForm(root) {
+  const o = {};
+  $$('[name]', root).forEach((el) => {
+    const k = el.name;
+    if (el.type === 'checkbox' && el.dataset.multi !== undefined) {
+      if (!(k in o)) o[k] = '';
+      if (el.checked) o[k] = o[k] ? `${o[k]}, ${el.value}` : el.value;
+    } else if (el.type === 'checkbox') o[k] = el.checked;
+    else if (el.type === 'radio') { if (el.checked) o[k] = el.value; }
+    else o[k] = typeof el.value === 'string' ? el.value.trim() : el.value;
+  });
+  return o;
+}
+function validate(root) {
+  const bad = $$('[required]', root).find((el) => !el.value);
+  if (bad) { bad.focus(); throw new Error('กรุณากรอกข้อมูลที่จำเป็น (*) ให้ครบ'); }
+  const pp = $$('.pp[data-req]', root).find((el) => !$('input[type=hidden]', el).value);
+  if (pp) { $('.pp-q', pp).focus(); throw new Error('กรุณาเลือกบุคคลจากรายการค้นหา'); }
+}
+
+// person picker (ค้นหาจากทะเบียนประชากร)
+function personPicker(name, value, display, req = true) {
+  return `<div class="pp" data-pp ${req ? 'data-req' : ''}><input type="search" class="pp-q" placeholder="พิมพ์ชื่อ / นามสกุล / เลขบัตร..." value="${esc(display || '')}" autocomplete="off">
+    <input type="hidden" name="${name}" value="${esc(value || '')}"><div class="pp-list" hidden></div></div>`;
+}
+let ppTimer;
+document.addEventListener('input', (e) => {
+  if (!e.target.matches('.pp-q')) return;
+  const box = e.target.closest('.pp');
+  $('input[type=hidden]', box).value = '';
+  clearTimeout(ppTimer);
+  ppTimer = setTimeout(run(async () => {
+    const q = e.target.value.trim();
+    const list = $('.pp-list', box);
+    if (q.length < 2) { list.hidden = true; return; }
+    const rows = await api('persons.search', { q }, true);
+    list.innerHTML = rows.length ? rows.map((r) => `<button type="button" data-act="ppPick" data-id="${r.id}" data-label="${esc(fname(r))}">
+      <b>${esc(fname(r))}</b> <span class="xs muted">หมู่ ${esc(r.moo || '-')} บ้านเลขที่ ${esc(r.house_no || '-')} · ${esc(r.cid || '')}</span></button>`).join('')
+      : '<div class="empty small">ไม่พบข้อมูล</div>';
+    list.hidden = false;
+  }), 300);
+});
+
+// ---------------- tables ----------------
+function tableHtml(cols, rows, { rowAct, rowId, empty, foot } = {}) {
+  if (!rows.length) return `<div class="tbl-wrap"><div class="empty">${empty || 'ไม่มีข้อมูล'}</div></div>`;
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${cols.map((c) => `<th class="${c.cls || ''}">${c.h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((r, i) => `<tr ${rowAct ? `class="click" data-act="${rowAct}" data-id="${esc(rowId ? rowId(r) : r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.f(r, i)}</td>`).join('')}</tr>`).join('')}</tbody>
+    ${foot ? `<tfoot>${foot}</tfoot>` : ''}</table></div>`;
+}
+function pager(res, key) {
+  const pages = Math.max(1, Math.ceil(res.total / res.size));
+  return `<div class="pager"><span class="muted">ทั้งหมด ${num(res.total)} รายการ · หน้า ${res.page}/${pages}</span>
+    <button class="btn btn-o btn-sm" data-act="page" data-key="${key}" data-page="${res.page - 1}" ${res.page <= 1 ? 'disabled' : ''}>‹ ก่อนหน้า</button>
+    <button class="btn btn-o btn-sm" data-act="page" data-key="${key}" data-page="${res.page + 1}" ${res.page >= pages ? 'disabled' : ''}>ถัดไป ›</button></div>`;
+}
+
+// ---------------- export ----------------
+function downloadB64(b64, mime, filename) {
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([arr], { type: mime }));
+  a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+async function exportReport(report, params, format) {
+  toast('กำลังสร้างไฟล์...');
+  if (format === 'xlsx') {
+    const rep = await api('report.data', { report, params });
+    const aoa = [[rep.title], [rep.subtitle || ''], [rep.printed || ''], rep.headers, ...rep.rows];
+    if (rep.totalCol != null) {
+      const t = rep.headers.map(() => '');
+      t[1] = 'รวมทั้งสิ้น';
+      t[rep.totalCol] = rep.rows.reduce((s, r) => s + Number(r[rep.totalCol] || 0), 0);
+      aoa.push(t);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = rep.headers.map((h, i) => ({ wch: Math.min(45, Math.max(String(h).length + 2, ...rep.rows.slice(0, 300).map((r) => String(r[i] == null ? '' : r[i]).length + 2))) }));
+    const last = rep.headers.length - 1;
+    ws['!merges'] = [0, 1, 2].map((r) => ({ s: { r, c: 0 }, e: { r, c: last } }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'รายงาน');
+    XLSX.writeFile(wb, `${report}_${today()}.xlsx`);
+    return;
+  }
+  const f = await api('export.file', { report, params, format });
+  downloadB64(f.base64, f.mime, f.filename.replace(/^(\w+)/, `$1_${today()}`));
+}
+function exportBtns(report, { xlsx = true, params } = {}) {
+  const p = params ? ` data-params="${esc(JSON.stringify(params))}"` : '';
+  return `<span class="row" style="gap:4px">
+    ${xlsx ? `<button class="btn btn-o btn-sm" data-act="export" data-report="${report}" data-format="xlsx"${p}>Excel</button>` : ''}
+    <button class="btn btn-o btn-sm" data-act="export" data-report="${report}" data-format="docx"${p}>Word</button>
+    <button class="btn btn-o btn-sm" data-act="export" data-report="${report}" data-format="pdf"${p}>PDF</button></span>`;
+}
+
+// ---------------- image ----------------
+function compressImage(file, max = 1600, q = 0.8) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', q));
+    };
+    img.onerror = () => rej(new Error('อ่านไฟล์รูปไม่ได้: ' + file.name));
+    img.src = url;
+  });
+}
+
+// =====================================================================
+//  Auth & shell
+// =====================================================================
+const NAV = [
+  { g: 'ภาพรวม' },
+  { id: 'dashboard', label: 'Dashboard', icon: 'home', roles: ALL },
+  { g: 'ข้อมูลประชากร', roles: READ },
+  { id: 'persons', label: 'ทะเบียนประชากร', icon: 'users', roles: READ },
+  { id: 'surveys', label: 'สำรวจประชากร', icon: 'clipboard', roles: READ },
+  { id: 'adl', label: 'ประเมิน ADL', icon: 'activity', roles: READ },
+  { g: 'การดูแล' },
+  { id: 'careplans', label: 'Care Plan', icon: 'file', roles: ALL },
+  { id: 'visits', label: 'การปฏิบัติงาน CG', icon: 'camera', roles: ALL },
+  { id: 'caregivers', label: 'Caregiver / Care Manager', icon: 'heart', roles: READ },
+  { g: 'ค่าตอบแทนและโครงการ' },
+  { id: 'payments', label: 'ค่าตอบแทน CG / CM', icon: 'wallet', roles: ALL },
+  { id: 'projects', label: 'โครงการ', icon: 'flag', roles: READ },
+  { id: 'reports', label: 'รายงาน / ส่งออก', icon: 'download', roles: ALL },
+  { g: 'ระบบ' },
+  { id: 'settings', label: 'ตั้งค่า', icon: 'settings', roles: ALL }
+];
+const ROLE_TH = { admin: 'ผู้ดูแลระบบ', cm: 'Care Manager', cg: 'Caregiver', viewer: 'ผู้บริหาร/ดูข้อมูล' };
+
+$('#loginForm').addEventListener('submit', run(async (e) => {
+  e.preventDefault();
+  const f = readForm(e.target);
+  $('#loginErr').hidden = true;
+  busy(true);
+  let r;
+  try { r = await gs('login', f.username, f.password); } finally { busy(false); }
+  if (!r.ok) { $('#loginErr').textContent = r.error; $('#loginErr').hidden = false; return; }
+  S.token = r.data.token;
+  LS.set('ltc_token', S.token);
+  await boot();
+}));
+
+async function boot() {
+  const me = await api('me');
+  S.user = me.user; S.settings = me.settings || {};
+  $('#login').hidden = true; $('#app').hidden = false;
+  $('#userName').textContent = `${S.user.full_name} · ${ROLE_TH[S.user.role]}`;
+  $('#avatar').textContent = (S.user.full_name || 'U').trim().charAt(0);
+  $('#orgName').textContent = (S.settings.org && S.settings.org.name) || 'ดูแลผู้มีภาวะพึ่งพิง';
+  renderNav();
+  const last = LS.get('ltc_view');
+  go(NAV.some((n) => n.id === last && can(n.roles)) ? last : 'dashboard');
+}
+
+function doLogout(expired) {
+  if (S.token) gs('logout', S.token).catch(() => {});
+  S.token = null; S.user = null;
+  LS.del('ltc_token');
+  $('#app').hidden = true; $('#login').hidden = false;
+  $('#modalRoot').innerHTML = '';
+  if (expired) toast('หมดเวลาการใช้งาน กรุณาเข้าสู่ระบบใหม่', true);
+}
+
+function renderNav() {
+  let html = '';
+  NAV.forEach((n, i) => {
+    if (n.g) {
+      const next = NAV.slice(i + 1).find((x) => x.g || can(x.roles));
+      if (next && !next.g) html += `<div class="nav-group">${esc(n.g)}</div>`;
+    } else if (can(n.roles)) html += `<a data-act="nav" data-view="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span></a>`;
+  });
+  $('#nav').innerHTML = html;
+}
+
+function go(view) {
+  S.view = view; S.exportParams = null;
+  LS.set('ltc_view', view);
+  S.charts.forEach((c) => c.destroy()); S.charts = [];
+  $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.view === view));
+  const item = NAV.find((n) => n.id === view);
+  $('#viewTitle').textContent = item ? item.label : '';
+  $('#side').classList.remove('open');
+  V.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+  run(VIEWS[view])();
+}
+function refresh() { go(S.view); }
+
+// ---------------- global click delegation ----------------
+const H = {};
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) {
+    $$('.pp-list').forEach((l) => { if (!l.parentElement.contains(e.target)) l.hidden = true; });
+    return;
+  }
+  if (b.tagName === 'TR' && e.target.closest('input,select,button,a,label,textarea')) return;
+  const fn = H[b.dataset.act];
+  if (fn) { e.preventDefault(); run(fn)(b.dataset, b, e); }
+});
+H.nav = (d) => go(d.view);
+H.toggleMenu = () => $('#side').classList.toggle('open');
+H.logout = () => doLogout();
+H.closeModal = (d, b) => closeModal(b);
+H.page = (d) => { S.state[d.key].page = Math.max(1, +d.page); S.loaders[d.key](); };
+H.export = (d) => exportReport(d.report, d.params ? JSON.parse(d.params) : (S.exportParams ? S.exportParams(d.report) : {}), d.format);
+H.ppPick = (d, b) => {
+  const box = b.closest('.pp');
+  $('input[type=hidden]', box).value = d.id;
+  $('.pp-q', box).value = d.label;
+  $('.pp-list', box).hidden = true;
+  box.dispatchEvent(new CustomEvent('pp-change', { detail: { id: d.id, label: d.label }, bubbles: true }));
+};
+
+// =====================================================================
+//  Dashboard
+// =====================================================================
+const CHART_INK = '#4d5f55', CHART_GRID = '#eceee6', CHART_FILL = '#1f6b47';
+function barChart(canvas, labels, data, opt = {}) {
+  if (!window.Chart) return;
+  S.charts.push(new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: opt.colors || CHART_FILL, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 38 }] },
+    options: {
+      indexAxis: opt.horizontal ? 'y' : 'x', maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${num(c.parsed[opt.horizontal ? 'x' : 'y'])} ${opt.unit || ''}` } } },
+      scales: {
+        x: { grid: { display: !!opt.horizontal, color: CHART_GRID }, ticks: { color: CHART_INK, font: { family: 'Sarabun' } }, beginAtZero: true },
+        y: { grid: { display: !opt.horizontal, color: CHART_GRID }, ticks: { color: CHART_INK, precision: 0, font: { family: 'Sarabun' } }, beginAtZero: true }
+      }
+    }
+  }));
+}
+function kpi(label, value, sub, accent) {
+  return `<div class="kpi ${accent ? 'accent' : ''}"><div class="l">${esc(label)}</div><div class="v">${value}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+}
+const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '-');
+
+async function vDashboard() {
+  if (S.user.role === 'cg') return vDashboardCg();
+  const month = S.state.dashMonth || curMonth();
+  const d = await api('dashboard', { month });
+  const g = d.groups || {};
+  V.innerHTML = `
+    <div class="filters"><span class="muted small">ข้อมูลเดือน</span><input type="month" id="dashMonth" value="${month}" style="width:auto">
+      <span class="grow"></span><span class="xs muted">${esc((S.settings.org || {}).name || '')}</span></div>
+    <div class="kpis">
+      ${kpi('ประชากรในทะเบียน', num(d.persons), 'คน (มีชีวิต)', true)}
+      ${kpi('ผู้สูงอายุ 60 ปีขึ้นไป', num(d.elderly), `${pct(d.elderly, d.persons)} ของประชากร`)}
+      ${kpi('ผู้พิการ', num(d.disabled), 'คน')}
+      ${kpi('ประเมิน ADL แล้ว', num(d.assessed), `${pct(d.assessed, d.elderly)} ของผู้สูงอายุ`)}
+      ${kpi('ผู้มีภาวะพึ่งพิง (เข้าเกณฑ์ LTC)', num(d.ltc_eligible), 'ADL ≤ ' + ((S.settings.adl || {}).ltc_max || 11))}
+      ${kpi('มี Care Plan', num(d.with_plan), `${pct(d.with_plan, d.ltc_eligible)} ของผู้เข้าเกณฑ์ · ร่าง ${d.plans_draft}`)}
+      ${kpi('Caregiver / Care Manager', `${d.caregivers} / ${d.care_managers}`, 'ที่ปฏิบัติงาน')}
+      ${kpi('การเยี่ยมของ CG เดือนนี้', num(d.visits_month), `รอตรวจสอบ ${num(d.visits_pending)} รายการ`)}
+      ${kpi('ค่าตอบแทน CG', money(d.cg_pay_month), thMonth(month))}
+      ${kpi('ค่าตอบแทน CM', money(d.cm_pay_month), thMonth(month))}
+    </div>
+    <div class="grid g3">
+      <div class="card"><h3>ระดับการพึ่งพิง (ADL ล่าสุด)</h3><div class="chart-box"><canvas id="cLevel"></canvas></div></div>
+      <div class="card"><h3>กลุ่มชุดสิทธิประโยชน์ LTC</h3><div class="chart-box"><canvas id="cGroup"></canvas></div></div>
+      <div class="card"><h3>สิ่งที่ต้องดำเนินการ</h3>
+        <div class="grid" style="gap:10px">
+          ${todo('ผู้เข้าเกณฑ์ที่ยังไม่มี Care Plan', Math.max(0, d.ltc_eligible - d.with_plan), 'adl')}
+          ${todo('Care Plan รออนุมัติ (ร่าง)', d.plans_draft, 'careplans')}
+          ${todo('บันทึกการเยี่ยมรอตรวจสอบ', d.visits_pending, 'visits')}
+          ${todo('ผู้สูงอายุที่ยังไม่ได้ประเมิน ADL', Math.max(0, d.elderly - d.assessed), 'persons')}
+        </div></div>
+    </div>
+    <div class="grid g2 mt">
+      <div class="card"><h3>จำนวนการเยี่ยมของ CG ย้อนหลัง 12 เดือน</h3><div class="chart-box"><canvas id="cTrend"></canvas></div></div>
+      <div class="card"><h3>ผู้มีภาวะพึ่งพิงรายหมู่บ้าน</h3><div class="chart-box"><canvas id="cMoo"></canvas></div></div>
+    </div>`;
+  $('#dashMonth').onchange = (e) => { S.state.dashMonth = e.target.value; refresh(); };
+  barChart($('#cLevel'), ['ติดสังคม', 'ติดบ้าน', 'ติดเตียง'], [d.dep_social, d.dep_home, d.dep_bed], { unit: 'คน', colors: ['#7fb894', '#2b8a5c', '#123a2b'] });
+  barChart($('#cGroup'), ['กลุ่ม 1', 'กลุ่ม 2', 'กลุ่ม 3', 'กลุ่ม 4'], [1, 2, 3, 4].map((k) => g[k] || 0), { unit: 'คน', colors: ['#a7d0b5', '#5fa67b', '#2b7a50', '#123a2b'] });
+  const months = [];
+  const [yy, mm] = month.split('-').map(Number);
+  for (let i = 11; i >= 0; i--) { const dt = new Date(yy, mm - 1 - i, 1); months.push(`${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`); }
+  const tmap = Object.fromEntries((d.visits_trend || []).map((t) => [t.month, t.n]));
+  barChart($('#cTrend'), months.map((m) => `${TH_M[+m.slice(5) - 1]} ${String(+m.slice(0, 4) + 543).slice(2)}`), months.map((m) => tmap[m] || 0), { unit: 'ครั้ง' });
+  const moo = d.by_moo || [];
+  barChart($('#cMoo'), moo.map((x) => 'หมู่ ' + x.moo), moo.map((x) => x.n), { unit: 'คน', horizontal: true });
+}
+function todo(label, n, view) {
+  return `<a class="row card" style="padding:10px 12px;text-decoration:none;color:inherit;cursor:pointer" data-act="nav" data-view="${view}">
+    <span class="grow small">${esc(label)}</span><span class="tag ${n ? 't-amber' : 't-green'}">${num(n)}</span></a>`;
+}
+
+async function vDashboardCg() {
+  const d = await api('dashboard.cg');
+  V.innerHTML = `
+    <div class="kpis">
+      ${kpi('ผู้รับบริการในความดูแล', num(d.plans.length), 'คน', true)}
+      ${kpi('การเยี่ยมเดือนนี้', num(d.visits_month), 'ครั้ง')}
+      ${kpi('ตรวจสอบแล้ว', num(d.verified), 'ครั้ง')}
+      ${kpi('ส่งกลับแก้ไข', num(d.rejected), 'ครั้ง')}
+    </div>
+    <h3 class="mb">ผู้รับบริการของฉัน</h3>
+    <div class="grid g3">${d.plans.map((p) => `
+      <div class="plan-card">
+        <div class="row"><b class="grow">${esc(fname(p.persons))}</b>${groupTag(p.ltc_group)}</div>
+        <div class="small muted">หมู่ ${esc(p.persons.moo || '-')} · ADL ${p.adl_score == null ? '-' : p.adl_score} · ${esc(p.plan_no || '')}</div>
+        <div class="row mt"><button class="btn btn-p btn-sm" data-act="visitNew" data-plan="${p.id}">${icon('camera')} บันทึกการเยี่ยม</button>
+          <button class="btn btn-o btn-sm" data-act="planOpen" data-id="${p.id}">ดู Care Plan</button></div>
+      </div>`).join('') || '<div class="empty card">ยังไม่มีผู้รับบริการที่มอบหมาย</div>'}</div>`;
+}
+
+// =====================================================================
+//  Persons — ทะเบียนประชากร + นำเข้าข้อมูล
+// =====================================================================
+const PREFIX = ['นาย', 'นาง', 'นางสาว', 'ด.ช.', 'ด.ญ.'];
+const RIGHTS = ['UC (บัตรทอง)', 'ข้าราชการ', 'ประกันสังคม', 'อปท.', 'อื่นๆ'];
+const DISAB = ['การเห็น', 'การได้ยินหรือสื่อความหมาย', 'การเคลื่อนไหวหรือทางร่างกาย', 'จิตใจหรือพฤติกรรม', 'สติปัญญา', 'การเรียนรู้', 'ออทิสติก'];
+function personFields() {
+  const o = S.settings.org || {};
+  return [
+    { k: 'cid', label: 'เลขบัตรประชาชน', attrs: 'maxlength="17" inputmode="numeric"', hint: '13 หลัก' },
+    { k: 'prefix', label: 'คำนำหน้า', type: 'select', options: PREFIX },
+    { k: 'first_name', label: 'ชื่อ', req: true },
+    { k: 'last_name', label: 'นามสกุล', req: true },
+    { k: 'gender', label: 'เพศ', type: 'select', options: ['ชาย', 'หญิง'] },
+    { k: 'birth_date', label: 'วันเกิด', type: 'date' },
+    { k: 'house_no', label: 'บ้านเลขที่' },
+    { k: 'moo', label: 'หมู่ที่' },
+    { k: 'subdistrict', label: 'ตำบล', def: o.subdistrict },
+    { k: 'district', label: 'อำเภอ', def: o.district },
+    { k: 'province', label: 'จังหวัด', def: o.province },
+    { k: 'phone', label: 'โทรศัพท์', type: 'tel' },
+    { k: 'health_right', label: 'สิทธิการรักษา', type: 'select', options: RIGHTS },
+    { k: 'disability_type', label: 'ประเภทความพิการ', type: 'select', options: DISAB, hint: 'เว้นว่างหากไม่พิการ' },
+    { k: 'chronic_diseases', label: 'โรคประจำตัว', span: true, ph: 'เช่น เบาหวาน, ความดันโลหิตสูง, หลอดเลือดสมอง' },
+    { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['alive', 'มีชีวิต'], ['dead', 'เสียชีวิต'], ['moved', 'ย้ายออก']] }
+  ];
+}
+
+async function vPersons() {
+  const st = S.state.persons = S.state.persons || { q: '', moo: '', status: 'alive', elderly: false, disabled: false, page: 1, size: 50 };
+  V.innerHTML = `
+    <div class="filters">
+      <input type="search" id="pq" placeholder="ค้นหาชื่อ / นามสกุล / เลขบัตร" value="${esc(st.q)}">
+      <input type="text" id="pmoo" placeholder="หมู่ที่" value="${esc(st.moo)}" style="width:90px">
+      <select id="pst" style="width:auto">${opts([['alive', 'มีชีวิต'], ['dead', 'เสียชีวิต'], ['moved', 'ย้ายออก']], st.status)}</select>
+      <label class="chk"><input type="checkbox" id="pel" ${st.elderly ? 'checked' : ''}> 60 ปีขึ้นไป</label>
+      <label class="chk"><input type="checkbox" id="pdis" ${st.disabled ? 'checked' : ''}> ผู้พิการ</label>
+      <span class="grow"></span>
+      ${isStaff() ? `<button class="btn btn-p" data-act="personNew">+ เพิ่มบุคคล</button><button class="btn btn-g" data-act="personImport">นำเข้า Excel/CSV</button>` : ''}
+      ${exportBtns('persons')}
+    </div><div id="plist"></div>`;
+  const upd = () => { st.q = $('#pq').value.trim(); st.moo = $('#pmoo').value.trim(); st.status = $('#pst').value; st.elderly = $('#pel').checked; st.disabled = $('#pdis').checked; st.page = 1; loadPersons(); };
+  let t; $('#pq').oninput = () => { clearTimeout(t); t = setTimeout(upd, 400); };
+  ['#pmoo', '#pst', '#pel', '#pdis'].forEach((s) => { $(s).onchange = upd; });
+  S.exportParams = () => ({ q: st.q, moo: st.moo, status: st.status, elderly: st.elderly, disabled: st.disabled });
+  S.loaders.persons = run(loadPersons);
+  await loadPersons();
+}
+async function loadPersons() {
+  const r = await api('persons.list', S.state.persons);
+  $('#plist').innerHTML = tableHtml([
+    { h: 'ชื่อ-สกุล', f: (p) => `<b>${esc(fname(p))}</b><div class="xs muted">${esc(p.cid || '')}</div>` },
+    { h: 'อายุ', f: (p) => age(p.birth_date), cls: 'center' },
+    { h: 'เพศ', f: (p) => esc(p.gender || '') },
+    { h: 'ที่อยู่', f: (p) => `${esc(p.house_no || '')} หมู่ ${esc(p.moo || '-')}` },
+    { h: 'โรคประจำตัว / ความพิการ', f: (p) => `<span class="small">${esc(p.chronic_diseases || '')}</span>${p.disability_type ? ` <span class="tag t-blue">พิการ${esc(p.disability_type)}</span>` : ''}` },
+    { h: 'ADL', f: (p) => (p.adl ? `<b>${p.adl.total_score}</b>` : '<span class="muted xs">ยังไม่ประเมิน</span>'), cls: 'center' },
+    { h: 'ระดับ', f: (p) => (p.adl ? levelTag(p.adl.dependency_level) : '') },
+    { h: 'กลุ่ม', f: (p) => (p.adl ? groupTag(p.adl.ltc_group) : '') }
+  ], r.rows, { rowAct: 'personOpen', empty: 'ยังไม่มีข้อมูลประชากร — เพิ่มทีละรายหรือนำเข้าจาก Excel/CSV' }) + pager(r, 'persons');
+}
+
+H.personNew = () => personForm({});
+H.personEdit = async (d) => personForm((await api('persons.get', { id: d.id })).person);
+function personForm(p) {
+  const m = openModal({ title: p.id ? 'แก้ไขข้อมูลบุคคล' : 'เพิ่มบุคคล', wide: true, body: formHtml(personFields(), p, 'c3'),
+    foot: `<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก</button>` });
+  $('[data-save]', m).onclick = run(async () => {
+    validate(m);
+    const saved = await api('persons.save', Object.assign(readForm(m), { id: p.id }));
+    closeModal(m); toast('บันทึกเรียบร้อย');
+    if (S.view === 'persons') loadPersons();
+    if (!p.id) H.personOpen({ id: saved.id });
+  });
+}
+
+H.personOpen = async (d) => {
+  const r = await api('persons.get', { id: d.id });
+  const p = r.person, adl = r.adl[0];
+  const body = `
+    <div class="row mb" style="gap:14px;align-items:flex-start">
+      <div class="avatar" style="width:52px;height:52px;font-size:20px">${esc((p.first_name || '?').charAt(0))}</div>
+      <div class="grow"><h3 style="font-size:19px">${esc(fname(p))}</h3>
+        <div class="small muted">${esc(p.cid || '-')} · อายุ ${age(p.birth_date) || '-'} ปี · ${esc(p.gender || '')} · หมู่ ${esc(p.moo || '-')} บ้านเลขที่ ${esc(p.house_no || '-')}</div>
+        <div class="row mt" style="gap:6px">${adl ? `ADL <b>${adl.total_score}</b> ${levelTag(adl.dependency_level)} ${groupTag(adl.ltc_group)}` : '<span class="tag t-amber">ยังไม่ได้ประเมิน ADL</span>'} ${tag(p.status)}</div></div>
+      ${isStaff() ? `<div class="row"><button class="btn btn-o btn-sm" data-act="personEdit" data-id="${p.id}">แก้ไข</button>
+        ${can(['admin']) ? `<button class="btn btn-d btn-sm" data-pdel>ลบ</button>` : ''}</div>` : ''}
+    </div>
+    <div class="tabs" data-tabs>
+      <button class="on" data-tab="info">ข้อมูลทั่วไป</button><button data-tab="sv">การสำรวจ (${r.surveys.length})</button>
+      <button data-tab="adl">ประเมิน ADL (${r.adl.length})</button><button data-tab="cp">Care Plan (${r.plans.length})</button><button data-tab="vs">การเยี่ยม (${r.visits.length})</button>
+    </div>
+    <div data-pane="info"><dl class="kv">
+      <dt>ที่อยู่</dt><dd>${esc([p.house_no, p.moo && 'หมู่ ' + p.moo, p.subdistrict && 'ต.' + p.subdistrict, p.district && 'อ.' + p.district, p.province && 'จ.' + p.province].filter(Boolean).join(' ') || '-')}</dd>
+      <dt>โทรศัพท์</dt><dd>${esc(p.phone || '-')}</dd><dt>วันเกิด</dt><dd>${thDate(p.birth_date)}</dd>
+      <dt>สิทธิการรักษา</dt><dd>${esc(p.health_right || '-')}</dd><dt>โรคประจำตัว</dt><dd>${esc(p.chronic_diseases || '-')}</dd>
+      <dt>ความพิการ</dt><dd>${esc(p.disability_type || '-')}</dd></dl></div>
+    <div data-pane="sv" hidden>${isStaff() ? `<button class="btn btn-p btn-sm mb" data-act="surveyNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ บันทึกการสำรวจ</button>` : ''}
+      ${tableHtml([{ h: 'วันที่', f: (s) => thDate(s.survey_date) }, { h: 'การอยู่อาศัย', f: (s) => esc(s.living_arrangement || '') }, { h: 'ผู้ดูแลหลัก', f: (s) => esc([s.main_caregiver, s.caregiver_relation].filter(Boolean).join(' / ')) }, { h: 'ความต้องการ', f: (s) => `<span class="small">${esc(s.needs || '')}</span>` }, { h: 'ผู้สำรวจ', f: (s) => esc(s.surveyor || '') }], r.surveys, { rowAct: isStaff() ? 'surveyEdit' : '' })}</div>
+    <div data-pane="adl" hidden>${isStaff() ? `<button class="btn btn-p btn-sm mb" data-act="adlNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ ประเมิน ADL</button>` : ''}
+      ${tableHtml([{ h: 'วันที่', f: (a) => thDate(a.assess_date) }, { h: 'คะแนน', f: (a) => `<b>${a.total_score}</b>/20`, cls: 'center' }, { h: 'ระดับ', f: (a) => levelTag(a.dependency_level) }, { h: 'กลุ่ม', f: (a) => groupTag(a.ltc_group) }, { h: 'ภาวะสับสน', f: (a) => (a.cognitive_impairment ? 'มี' : '-') }, { h: 'ผู้ประเมิน', f: (a) => esc(a.assessor || '') }], r.adl, { rowAct: isStaff() ? 'adlEdit' : '' })}</div>
+    <div data-pane="cp" hidden>${isStaff() && adl && adl.ltc_group ? `<button class="btn btn-p btn-sm mb" data-act="planNew" data-person="${p.id}" data-label="${esc(fname(p))}">+ จัดทำ Care Plan</button>` : ''}
+      ${tableHtml([{ h: 'เลขที่', f: (c) => esc(c.plan_no || '') }, { h: 'ช่วงเวลา', f: (c) => `${thDate(c.start_date)} - ${thDate(c.end_date)}` }, { h: 'CG', f: (c) => esc(c.caregivers ? c.caregivers.full_name : '-') }, { h: 'ฉบับ', f: (c) => c.version, cls: 'center' }, { h: 'งบ', f: (c) => money(c.budget), cls: 'right' }, { h: 'สถานะ', f: (c) => tag(c.status) }], r.plans, { rowAct: 'planOpen' })}</div>
+    <div data-pane="vs" hidden>${tableHtml([{ h: 'วันที่', f: (v) => thDate(v.visit_date) }, { h: 'CG', f: (v) => esc(v.caregivers ? v.caregivers.full_name : '') }, { h: 'บันทึก', f: (v) => `<span class="small">${esc(v.notes || '')}</span>` }, { h: 'สถานะ', f: (v) => tag(v.status) }], r.visits, { rowAct: 'visitOpen' })}</div>`;
+  const m = openModal({ title: 'ข้อมูลบุคคล', body, wide: true });
+  bindTabs(m);
+  const del = $('[data-pdel]', m);
+  if (del) del.onclick = run(async () => {
+    if (!(await askConfirm(`ลบ ${fname(p)} และข้อมูลที่เกี่ยวข้องทั้งหมด (สำรวจ/ADL/Care Plan/การเยี่ยม)?`, 'ลบ', true))) return;
+    await api('persons.delete', { id: p.id }); closeModal(m); toast('ลบแล้ว'); refresh();
+  });
+};
+function bindTabs(root) {
+  $$('[data-tabs] [data-tab]', root).forEach((b) => {
+    b.onclick = () => {
+      $$('[data-tabs] [data-tab]', root).forEach((x) => x.classList.toggle('on', x === b));
+      $$('[data-pane]', root).forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
+    };
+  });
+}
+
+// ----- นำเข้าข้อมูลประชากร -----
+const IMPORT_MAP = {
+  cid: ['เลขบัตรประชาชน', 'เลขประจำตัวประชาชน', 'เลขบัตร', 'cid', 'pid', 'idcard'],
+  prefix: ['คำนำหน้า', 'คำนำหน้าชื่อ', 'prefix', 'title'],
+  first_name: ['ชื่อ', 'first_name', 'firstname', 'fname', 'name'],
+  last_name: ['นามสกุล', 'สกุล', 'last_name', 'lastname', 'lname'],
+  full_name: ['ชื่อ-สกุล', 'ชื่อ-นามสกุล', 'ชื่อสกุล', 'fullname'],
+  gender: ['เพศ', 'sex', 'gender'],
+  birth_date: ['วันเกิด', 'วันเดือนปีเกิด', 'birth_date', 'birthdate', 'dob'],
+  house_no: ['บ้านเลขที่', 'house_no', 'houseno', 'เลขที่'],
+  moo: ['หมู่', 'หมู่ที่', 'moo', 'village'],
+  subdistrict: ['ตำบล', 'subdistrict', 'tambon'], district: ['อำเภอ', 'district', 'amphur'], province: ['จังหวัด', 'province'],
+  phone: ['โทรศัพท์', 'เบอร์โทร', 'โทร', 'phone', 'tel'],
+  health_right: ['สิทธิการรักษา', 'สิทธิ', 'health_right'],
+  disability_type: ['ประเภทความพิการ', 'ความพิการ', 'disability_type'],
+  chronic_diseases: ['โรคประจำตัว', 'โรค', 'chronic_diseases']
+};
+const normH = (s) => String(s || '').toLowerCase().replace(/[\s_]/g, '');
+H.personImport = () => {
+  const m = openModal({ title: 'นำเข้าข้อมูลประชากรจาก Excel / CSV', wide: true, body: `
+    <div class="hint mb">รองรับไฟล์ .xlsx .xls .csv — แถวแรกเป็นหัวคอลัมน์ ระบบจับคู่คอลัมน์อัตโนมัติ (ชื่อ, นามสกุล, เลขบัตรประชาชน, วันเกิด, หมู่ ฯลฯ)
+      วันที่รองรับทั้ง พ.ศ./ค.ศ. · บุคคลที่เลขบัตรซ้ำกับในระบบจะถูก <b>อัปเดต</b></div>
+    <div class="row mb"><input type="file" accept=".xlsx,.xls,.csv" data-file style="flex:1"><button class="btn btn-o btn-sm" data-tpl>ดาวน์โหลดไฟล์ต้นแบบ</button></div>
+    <div data-preview></div>`,
+    foot: `<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-go disabled>นำเข้าข้อมูล</button>` });
+  let rows = [];
+  $('[data-tpl]', m).onclick = () => {
+    const ws = XLSX.utils.aoa_to_sheet([['เลขบัตรประชาชน', 'คำนำหน้า', 'ชื่อ', 'นามสกุล', 'เพศ', 'วันเกิด', 'บ้านเลขที่', 'หมู่', 'ตำบล', 'อำเภอ', 'จังหวัด', 'โทรศัพท์', 'สิทธิการรักษา', 'ประเภทความพิการ', 'โรคประจำตัว'],
+      ['3100000000001', 'นาง', 'สมศรี', 'ใจดี', 'หญิง', '15/03/2490', '12', '3', '', '', '', '0812345678', 'UC (บัตรทอง)', '', 'เบาหวาน, ความดัน']]);
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'ประชากร'); XLSX.writeFile(wb, 'template_population.xlsx');
+  };
+  $('[data-file]', m).onchange = run(async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const isCsv = /\.csv$/i.test(file.name);
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: isCsv, codepage: 65001 });
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: true });
+    if (!raw.length) throw new Error('ไม่พบข้อมูลในไฟล์');
+    const heads = Object.keys(raw[0]);
+    const map = {};
+    Object.entries(IMPORT_MAP).forEach(([k, alias]) => { const h = heads.find((x) => alias.map(normH).includes(normH(x))); if (h) map[k] = h; });
+    rows = raw.map((r) => {
+      const o = {};
+      Object.entries(map).forEach(([k, h]) => { o[k] = r[h]; });
+      if (o.full_name && !o.first_name) {
+        let s = String(o.full_name).trim();
+        const pf = PREFIX.find((x) => s.startsWith(x)); if (pf) { o.prefix = o.prefix || pf; s = s.slice(pf.length).trim(); }
+        const parts = s.split(/\s+/); o.first_name = parts.shift(); o.last_name = parts.join(' ');
+      }
+      delete o.full_name;
+      if (o.cid != null) o.cid = String(o.cid);
+      return o;
+    }).filter((o) => o.first_name);
+    const cols = Object.keys(IMPORT_MAP).filter((k) => k !== 'full_name' && rows.some((r) => r[k] !== undefined && r[k] !== ''));
+    $('[data-preview]', m).innerHTML = `<div class="row mb small"><b>${num(rows.length)}</b>&nbsp;แถว · คอลัมน์ที่จับคู่ได้:
+      ${Object.entries(map).map(([k, h]) => `<span class="tag t-green">${esc(h)}</span>`).join(' ')}
+      ${heads.filter((h) => !Object.values(map).includes(h)).map((h) => `<span class="tag" title="ไม่ได้ใช้">${esc(h)}</span>`).join(' ')}</div>
+      ${tableHtml(cols.map((k) => ({ h: k, f: (r) => esc(r[k] == null ? '' : r[k]) })), rows.slice(0, 8))}
+      ${rows.length > 8 ? `<div class="xs muted mt">แสดง 8 แถวแรก</div>` : ''}`;
+    $('[data-go]', m).disabled = !rows.length;
+  });
+  $('[data-go]', m).onclick = run(async () => {
+    let done = 0; const errors = [];
+    for (let i = 0; i < rows.length; i += 1000) {
+      const r = await api('persons.import', { rows: rows.slice(i, i + 1000) });
+      done += r.imported; errors.push(...r.errors.map((x) => x.replace(/แถว (\d+)/, (a, n) => `แถว ${+n + i}`)));
+    }
+    closeModal(m);
+    toast(`นำเข้าสำเร็จ ${num(done)} รายการ${errors.length ? ` · ผิดพลาด ${errors.length}` : ''}`);
+    if (errors.length) openModal({ title: 'แถวที่นำเข้าไม่ได้', body: `<div class="small">${errors.slice(0, 200).map(esc).join('<br>')}</div>` });
+    if (S.view === 'persons') loadPersons();
+  });
+};
+
+// =====================================================================
+//  Surveys — การสำรวจประชากร
+// =====================================================================
+const NEEDS = ['เบี้ยยังชีพ', 'อุปกรณ์ช่วยเหลือ', 'ปรับปรุงที่อยู่อาศัย', 'ผู้ดูแล/CG', 'กายภาพบำบัด', 'อาหาร/โภชนาการ', 'ยาและเวชภัณฑ์', 'การเดินทางไปรับบริการ', 'สวัสดิการสังคม', 'ผ้าอ้อมผู้ใหญ่'];
+function surveyFields(display) {
+  return [
+    { k: 'person_id', label: 'บุคคลที่สำรวจ', type: 'person', display, span: true, req: true },
+    { k: 'survey_date', label: 'วันที่สำรวจ', type: 'date', def: today(), req: true },
+    { k: 'surveyor', label: 'ผู้สำรวจ', def: S.user.full_name },
+    { k: 'living_arrangement', label: 'การอยู่อาศัย', type: 'select', options: ['อยู่คนเดียว', 'อยู่กับคู่สมรส', 'อยู่กับบุตรหลาน', 'อยู่กับญาติ', 'อยู่ลำพังในเวลากลางวัน'] },
+    { k: 'income_level', label: 'รายได้ต่อเดือน', type: 'select', options: ['ไม่มีรายได้', 'ต่ำกว่า 3,000 บาท', '3,000-10,000 บาท', 'มากกว่า 10,000 บาท'] },
+    { k: 'main_caregiver', label: 'ผู้ดูแลหลักในครอบครัว' },
+    { k: 'caregiver_relation', label: 'ความสัมพันธ์', type: 'select', options: ['คู่สมรส', 'บุตร', 'หลาน', 'ญาติ', 'เพื่อนบ้าน', 'ไม่มีผู้ดูแล'] },
+    { k: 'housing_condition', label: 'สภาพที่อยู่อาศัย', type: 'select', options: ['มั่นคงแข็งแรง', 'ชำรุดบางส่วน', 'ทรุดโทรม ต้องปรับปรุง'] },
+    { k: 'equipment', label: 'อุปกรณ์ที่มี/ต้องการ', ph: 'เช่น ที่นอนลม รถเข็น ไม้เท้า' },
+    { k: 'needs', label: 'ความต้องการช่วยเหลือ', type: 'multi', options: NEEDS, span: true },
+    { k: 'notes', label: 'หมายเหตุ', type: 'textarea', span: true }
+  ];
+}
+async function vSurveys() {
+  const st = S.state.surveys = S.state.surveys || { from: '', to: '', page: 1, size: 50 };
+  V.innerHTML = `<div class="filters">
+      <span class="small muted">ช่วงวันที่</span><input type="date" id="sf" value="${st.from}" style="width:auto"><input type="date" id="stt" value="${st.to}" style="width:auto">
+      <span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="surveyNew">+ บันทึกการสำรวจ</button>' : ''}${exportBtns('surveys')}
+    </div><div id="slist"></div>`;
+  ['#sf', '#stt'].forEach((s) => { $(s).onchange = () => { st.from = $('#sf').value; st.to = $('#stt').value; st.page = 1; loadSurveys(); }; });
+  S.exportParams = () => ({ from: st.from, to: st.to });
+  S.loaders.surveys = run(loadSurveys);
+  await loadSurveys();
+}
+async function loadSurveys() {
+  const r = await api('surveys.list', S.state.surveys);
+  S.state.surveyRows = Object.fromEntries(r.rows.map((x) => [x.id, x]));
+  $('#slist').innerHTML = tableHtml([
+    { h: 'วันที่', f: (s) => thDate(s.survey_date) },
+    { h: 'ชื่อ-สกุล', f: (s) => `<b>${esc(fname(s.persons))}</b><div class="xs muted">หมู่ ${esc(s.persons ? s.persons.moo || '-' : '-')} · อายุ ${age(s.persons && s.persons.birth_date)}</div>` },
+    { h: 'การอยู่อาศัย', f: (s) => esc(s.living_arrangement || '') },
+    { h: 'ผู้ดูแลหลัก', f: (s) => esc([s.main_caregiver, s.caregiver_relation].filter(Boolean).join(' / ')) },
+    { h: 'ที่อยู่อาศัย', f: (s) => esc(s.housing_condition || '') },
+    { h: 'ความต้องการ', f: (s) => `<span class="small">${esc(s.needs || '')}</span>` },
+    { h: 'ผู้สำรวจ', f: (s) => esc(s.surveyor || '') }
+  ], r.rows, { rowAct: isStaff() ? 'surveyEdit' : '', empty: 'ยังไม่มีข้อมูลการสำรวจ' }) + pager(r, 'surveys');
+}
+H.surveyNew = (d) => surveyForm({ person_id: d.person }, d.label);
+H.surveyEdit = async (d) => {
+  let s = (S.state.surveyRows || {})[d.id];
+  if (!s) s = (await api('surveys.list', { page: 1, size: 500 })).rows.find((x) => x.id === d.id);
+  if (s) surveyForm(s, fname(s.persons));
+};
+function surveyForm(s, label) {
+  const m = openModal({ title: s.id ? 'แก้ไขการสำรวจ' : 'บันทึกการสำรวจประชากร', wide: true, body: formHtml(surveyFields(label), s),
+    foot: `${s.id ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button>
+      <button class="btn btn-o" data-save="adl">บันทึก + ประเมิน ADL ต่อ</button><button class="btn btn-p" data-save>บันทึก</button>` });
+  $$('[data-save]', m).forEach((b) => { b.onclick = run(async () => {
+    validate(m);
+    const data = Object.assign(readForm(m), { id: s.id });
+    data.needs = data.needs || '';
+    await api('surveys.save', data);
+    closeModal(m); toast('บันทึกการสำรวจแล้ว');
+    if (S.view === 'surveys') loadSurveys();
+    if (b.dataset.save === 'adl') adlForm({ person_id: data.person_id }, $('.pp-q', m).value);
+  }); });
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบรายการสำรวจนี้?', 'ลบ', true))) return; await api('surveys.delete', { id: s.id }); closeModal(m); toast('ลบแล้ว'); if (S.view === 'surveys') loadSurveys(); });
+}
+
+// =====================================================================
+//  ADL (Barthel Index)
+// =====================================================================
+const ADL_ITEMS = [
+  ['feeding', '1. การรับประทานอาหาร (Feeding)', ['ไม่สามารถตักอาหารเข้าปากได้ ต้องมีคนป้อนให้', 'ตักอาหารเองได้แต่ต้องมีคนช่วย เช่น ตัด/ใช้ช้อนตักเตรียมไว้ให้', 'ตักอาหารและช่วยตัวเองได้เป็นปกติ']],
+  ['grooming', '2. การล้างหน้า หวีผม แปรงฟัน โกนหนวด (Grooming)', ['ต้องการความช่วยเหลือ', 'ทำได้เอง (รวมทั้งที่ทำได้เองถ้าเตรียมอุปกรณ์ไว้ให้)']],
+  ['transfer', '3. การลุกนั่งจากที่นอนหรือเตียงไปยังเก้าอี้ (Transfer)', ['ไม่สามารถนั่งได้ (นั่งแล้วล้มเสมอ) หรือต้องใช้คนสองคนช่วยยกขึ้น', 'ต้องการความช่วยเหลืออย่างมากจึงจะนั่งได้', 'ต้องการความช่วยเหลือบ้าง เช่น บอกให้ทำตาม หรือช่วยพยุงเล็กน้อย', 'ทำได้เอง']],
+  ['toilet_use', '4. การใช้ห้องน้ำ (Toilet use)', ['ช่วยตัวเองไม่ได้', 'ทำเองได้บ้าง (อย่างน้อยทำความสะอาดตัวเองได้หลังเสร็จธุระ)', 'ช่วยตัวเองได้ดี']],
+  ['mobility', '5. การเคลื่อนที่ภายในห้องหรือบ้าน (Mobility)', ['เคลื่อนที่ไปไหนไม่ได้', 'ต้องใช้รถเข็นช่วยตัวเองให้เคลื่อนที่ได้เอง', 'เดินหรือเคลื่อนที่โดยมีคนช่วย', 'เดินหรือเคลื่อนที่ได้เอง']],
+  ['dressing', '6. การสวมใส่เสื้อผ้า (Dressing)', ['ต้องมีคนสวมใส่ให้ ช่วยตัวเองแทบไม่ได้', 'ช่วยตัวเองได้ประมาณร้อยละ 50 ที่เหลือต้องมีคนช่วย', 'ช่วยตัวเองได้ดี']],
+  ['stairs', '7. การขึ้นลงบันได 1 ชั้น (Stairs)', ['ไม่สามารถทำได้', 'ต้องการคนช่วย', 'ขึ้นลงได้เอง']],
+  ['bathing', '8. การอาบน้ำ (Bathing)', ['ต้องมีคนช่วยหรือทำให้', 'อาบน้ำเองได้']],
+  ['bowels', '9. การกลั้นการถ่ายอุจจาระ ใน 1 สัปดาห์ที่ผ่านมา (Bowels)', ['กลั้นไม่ได้ หรือต้องการการสวนอุจจาระอยู่เสมอ', 'กลั้นไม่ได้บางครั้ง (ไม่เกิน 1 ครั้งต่อสัปดาห์)', 'กลั้นได้เป็นปกติ']],
+  ['bladder', '10. การกลั้นปัสสาวะ ใน 1 สัปดาห์ที่ผ่านมา (Bladder)', ['กลั้นไม่ได้ หรือใส่สายสวนปัสสาวะแต่ไม่สามารถดูแลเองได้', 'กลั้นไม่ได้บางครั้ง (ไม่เกินวันละ 1 ครั้ง)', 'กลั้นได้เป็นปกติ']]
+];
+function calcAdl(a) {
+  const cfg = Object.assign({ bed_max: 4, home_max: 11, ltc_max: 11 }, S.settings.adl || {});
+  const total = ADL_ITEMS.reduce((s, [k]) => s + Number(a[k] || 0), 0);
+  const level = total <= cfg.bed_max ? 'ติดเตียง' : total <= cfg.home_max ? 'ติดบ้าน' : 'ติดสังคม';
+  let group = null;
+  if (total <= cfg.ltc_max) group = a.terminal_ill ? 4 : total <= cfg.bed_max ? 3 : a.cognitive_impairment ? 2 : 1;
+  return { total, level, group };
+}
+async function vAdl() {
+  const st = S.state.adl = S.state.adl || { group: '', level: '', moo: '', page: 1, size: 50 };
+  V.innerHTML = `<div class="filters">
+      <select id="ag" style="width:auto">${opts([['', 'ทุกกลุ่ม'], ['eligible', 'เข้าเกณฑ์ LTC ทั้งหมด'], ['1', 'กลุ่ม 1'], ['2', 'กลุ่ม 2'], ['3', 'กลุ่ม 3'], ['4', 'กลุ่ม 4']], st.group)}</select>
+      <select id="al" style="width:auto">${opts([['', 'ทุกระดับ'], ['ติดสังคม', 'ติดสังคม'], ['ติดบ้าน', 'ติดบ้าน'], ['ติดเตียง', 'ติดเตียง']], st.level)}</select>
+      <input type="text" id="am" placeholder="หมู่ที่" value="${esc(st.moo)}" style="width:90px">
+      <span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="adlNew">+ ประเมิน ADL</button>' : ''}${exportBtns('adl')}
+    </div>
+    <div class="hint mb">แสดงผลการประเมินล่าสุดของแต่ละคน · เกณฑ์ (ปรับได้ที่ตั้งค่า): ติดเตียง 0-${(S.settings.adl || {}).bed_max || 4},
+      ติดบ้าน ${((S.settings.adl || {}).bed_max || 4) + 1}-${(S.settings.adl || {}).home_max || 11}, ติดสังคม ${((S.settings.adl || {}).home_max || 11) + 1}-20 ·
+      กลุ่ม 1 เคลื่อนไหวได้บ้าง · กลุ่ม 2 เคลื่อนไหวได้บ้าง+สับสน · กลุ่ม 3 เคลื่อนไหวไม่ได้ · กลุ่ม 4 เจ็บป่วยระยะท้าย</div>
+    <div id="alist"></div>`;
+  const upd = () => { st.group = $('#ag').value; st.level = $('#al').value; st.moo = $('#am').value.trim(); st.page = 1; loadAdl(); };
+  ['#ag', '#al', '#am'].forEach((s) => { $(s).onchange = upd; });
+  S.exportParams = () => ({ group: st.group, level: st.level, moo: st.moo });
+  S.loaders.adl = run(loadAdl);
+  await loadAdl();
+}
+async function loadAdl() {
+  const r = await api('adl.list', S.state.adl);
+  $('#alist').innerHTML = tableHtml([
+    { h: 'ชื่อ-สกุล', f: (a) => `<b>${esc(fname(a))}</b><div class="xs muted">${esc(a.cid || '')}</div>` },
+    { h: 'หมู่', f: (a) => esc(a.moo || '-'), cls: 'center' }, { h: 'อายุ', f: (a) => age(a.birth_date), cls: 'center' },
+    { h: 'วันที่ประเมิน', f: (a) => thDate(a.assess_date) },
+    { h: 'คะแนน ADL', f: (a) => `<b>${a.total_score}</b>/20`, cls: 'center' },
+    { h: 'ระดับ', f: (a) => levelTag(a.dependency_level) }, { h: 'กลุ่ม LTC', f: (a) => groupTag(a.ltc_group) },
+    { h: 'สับสน/ระยะท้าย', f: (a) => [a.cognitive_impairment && 'สับสน', a.terminal_ill && 'ระยะท้าย'].filter(Boolean).join(', ') || '-' },
+    { h: '', f: (a) => (isStaff() ? `<button class="btn btn-o btn-sm" data-act="adlNew" data-person="${a.person_id}" data-label="${esc(fname(a))}">ประเมินซ้ำ</button>` : '') }
+  ], r.rows, { rowAct: 'personOpen', rowId: (a) => a.person_id, empty: 'ยังไม่มีผลการประเมิน' }) + pager(r, 'adl');
+}
+H.adlNew = (d) => adlForm({ person_id: d.person }, d.label);
+H.adlEdit = async (d) => {
+  const a = await api('adl.get', { id: d.id });
+  adlForm(a, fname(a.persons));
+};
+function adlForm(a, label) {
+  const items = ADL_ITEMS.map(([k, title, choices]) => `<div class="adl-item"><b>${esc(title)}</b>
+      ${choices.map((c, i) => `<label class="adl-opt"><input type="radio" name="${k}" value="${i}" ${String(a[k]) === String(i) ? 'checked' : ''} required> <span><b>${i}</b> — ${esc(c)}</span></label>`).join('')}</div>`).join('');
+  const m = openModal({ title: a.id ? 'แก้ไขผลประเมิน ADL' : 'แบบประเมินความสามารถในการทำกิจวัตรประจำวัน (Barthel ADL Index)', wide: true, body: `
+    ${formHtml([
+      { k: 'person_id', label: 'ผู้ถูกประเมิน', type: 'person', display: label, span: true },
+      { k: 'assess_date', label: 'วันที่ประเมิน', type: 'date', def: today(), req: true },
+      { k: 'assessor', label: 'ผู้ประเมิน', def: S.user.full_name }
+    ], a)}
+    <div class="grid g2 mt">${items}</div>
+    <div class="row mt" style="gap:20px">
+      <label class="chk"><input type="checkbox" name="cognitive_impairment" ${a.cognitive_impairment ? 'checked' : ''}> มีภาวะสับสนทางสมอง (Cognitive impairment)</label>
+      <label class="chk"><input type="checkbox" name="terminal_ill" ${a.terminal_ill ? 'checked' : ''}> เจ็บป่วยรุนแรง/ระยะท้ายของชีวิต</label>
+    </div>
+    <div class="f mt"><label>หมายเหตุ</label><textarea name="notes" rows="2">${esc(a.notes || '')}</textarea></div>
+    <div class="adl-sum" data-sum></div>`,
+    foot: `${a.id ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึกผลประเมิน</button>` });
+  const upd = () => {
+    const f = readForm(m), r = calcAdl(f);
+    const answered = ADL_ITEMS.filter(([k]) => f[k] !== undefined).length;
+    $('[data-sum]', m).innerHTML = `<span>คะแนนรวม <b>${r.total}</b>/20</span><span>ระดับ: <b style="font-size:17px">${r.level}</b></span>
+      <span>${r.group ? `กลุ่มชุดสิทธิประโยชน์ <b style="font-size:17px">กลุ่ม ${r.group}</b>` : 'ไม่เข้าเกณฑ์ LTC'}</span><span class="xs" style="opacity:.75">ตอบแล้ว ${answered}/10 ข้อ</span>`;
+  };
+  m.addEventListener('change', upd); upd();
+  $('[data-save]', m).onclick = run(async () => {
+    const f = readForm(m);
+    if (!f.person_id) throw new Error('กรุณาเลือกผู้ถูกประเมิน');
+    if (ADL_ITEMS.some(([k]) => f[k] === undefined)) throw new Error('กรุณาประเมินให้ครบทั้ง 10 ข้อ');
+    const saved = await api('adl.save', Object.assign(f, { id: a.id }));
+    closeModal(m);
+    toast(`บันทึกแล้ว: ADL ${saved.total_score} คะแนน (${saved.dependency_level})`);
+    if (S.view === 'adl') loadAdl();
+    if (saved.ltc_group && isStaff() && !a.id && (await askConfirm(`ผู้ถูกประเมินเข้าเกณฑ์ LTC กลุ่ม ${saved.ltc_group} ต้องการจัดทำ Care Plan ต่อหรือไม่?`, 'จัดทำ Care Plan'))) {
+      planEditor({ person_id: f.person_id }, $('.pp-q', m) ? $('.pp-q', m).value : label);
+    }
+  });
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบผลประเมินนี้?', 'ลบ', true))) return; await api('adl.delete', { id: a.id }); closeModal(m); toast('ลบแล้ว'); refresh(); });
+}
+
+// =====================================================================
+//  Caregiver / Care Manager
+// =====================================================================
+async function vCaregivers() {
+  const tab = S.state.cgTab || 'cg';
+  V.innerHTML = `<div class="tabs"><button data-act="cgTab" data-tab="cg" class="${tab === 'cg' ? 'on' : ''}">Caregiver (CG)</button>
+    <button data-act="cgTab" data-tab="cm" class="${tab === 'cm' ? 'on' : ''}">Care Manager (CM)</button></div><div id="cglist"></div>`;
+  if (tab === 'cg') {
+    const rows = await api('cg.list');
+    S.state.cgRows = rows;
+    $('#cglist').innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="cgEdit">+ เพิ่ม Caregiver</button>' : ''}${exportBtns('caregivers')}</div>` +
+      tableHtml([
+        { h: 'ชื่อ-สกุล', f: (c) => `<b>${esc(c.full_name)}</b><div class="xs muted">${esc(c.phone || '')}</div>` },
+        { h: 'หมู่', f: (c) => esc(c.moo || '-'), cls: 'center' },
+        { h: 'อบรม (ชม.)', f: (c) => esc(c.training_hours || '-'), cls: 'center' },
+        { h: 'เลขที่ใบรับรอง', f: (c) => esc(c.cert_no || '-') },
+        { h: 'Care Manager', f: (c) => esc(c.care_managers ? c.care_managers.full_name : '-') },
+        { h: 'ผู้รับบริการ', f: (c) => `<b>${c.case_count}</b> คน`, cls: 'center' },
+        { h: 'สถานะ', f: (c) => tag(c.status === 'active' ? 'active_s' : 'inactive') }
+      ], rows, { rowAct: isStaff() ? 'cgEdit' : '', empty: 'ยังไม่มีข้อมูล Caregiver' });
+  } else {
+    const rows = await api('cm.list');
+    S.state.cmRows = rows;
+    $('#cglist').innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="cmEdit">+ เพิ่ม Care Manager</button>' : ''}</div>` +
+      tableHtml([
+        { h: 'ชื่อ-สกุล', f: (c) => `<b>${esc(c.full_name)}</b><div class="xs muted">${esc(c.phone || '')}</div>` },
+        { h: 'ตำแหน่ง', f: (c) => esc(c.position || '-') }, { h: 'หน่วยงาน', f: (c) => esc(c.unit || '-') },
+        { h: 'เลขที่ใบรับรอง CM', f: (c) => esc(c.cert_no || '-') },
+        { h: 'เคสที่ดูแล', f: (c) => `<b>${c.case_count}</b> คน`, cls: 'center' },
+        { h: 'สถานะ', f: (c) => tag(c.status === 'active' ? 'active_s' : 'inactive') }
+      ], rows, { rowAct: isStaff() ? 'cmEdit' : '', empty: 'ยังไม่มีข้อมูล Care Manager' });
+  }
+}
+H.cgTab = (d) => { S.state.cgTab = d.tab; refresh(); };
+H.cgEdit = async (d) => {
+  const c = (S.state.cgRows || []).find((x) => x.id === d.id) || { status: 'active', training_hours: 70 };
+  const cms = await api('cm.list');
+  const m = openModal({ title: c.id ? 'แก้ไข Caregiver' : 'เพิ่ม Caregiver', wide: true, body: formHtml([
+    { k: 'full_name', label: 'ชื่อ-สกุล', req: true }, { k: 'cid', label: 'เลขบัตรประชาชน' }, { k: 'phone', label: 'โทรศัพท์', type: 'tel' },
+    { k: 'moo', label: 'หมู่ที่' }, { k: 'address', label: 'ที่อยู่', span: true },
+    { k: 'training_hours', label: 'ชั่วโมงอบรม', type: 'number', hint: 'หลักสูตร CG 70 ชม. / หลักสูตรต่อยอด' }, { k: 'cert_no', label: 'เลขที่ใบประกาศนียบัตร' },
+    { k: 'start_date', label: 'วันที่เริ่มปฏิบัติงาน', type: 'date' },
+    { k: 'cm_id', label: 'Care Manager ที่กำกับดูแล', type: 'select', options: cms.map((x) => [x.id, x.full_name]) },
+    { k: 'bank_name', label: 'ธนาคาร' }, { k: 'bank_account', label: 'เลขที่บัญชี' },
+    { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['active', 'ปฏิบัติงาน'], ['inactive', 'พ้นสภาพ']] }
+  ], c, 'c3'), foot: `${c.id && can(['admin']) ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก</button>` });
+  $('[data-save]', m).onclick = run(async () => { validate(m); await api('cg.save', Object.assign(readForm(m), { id: c.id })); closeModal(m); toast('บันทึกแล้ว'); refresh(); });
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบ Caregiver นี้? (ประวัติการเยี่ยมจะถูกลบด้วย แนะนำให้เปลี่ยนสถานะเป็นพ้นสภาพแทน)', 'ลบ', true))) return; await api('cg.delete', { id: c.id }); closeModal(m); refresh(); });
+};
+H.cmEdit = async (d) => {
+  const c = (S.state.cmRows || []).find((x) => x.id === d.id) || { status: 'active' };
+  const m = openModal({ title: c.id ? 'แก้ไข Care Manager' : 'เพิ่ม Care Manager', wide: true, body: formHtml([
+    { k: 'full_name', label: 'ชื่อ-สกุล', req: true }, { k: 'cid', label: 'เลขบัตรประชาชน' }, { k: 'phone', label: 'โทรศัพท์', type: 'tel' },
+    { k: 'position', label: 'ตำแหน่ง', ph: 'เช่น พยาบาลวิชาชีพ' }, { k: 'unit', label: 'หน่วยงาน', ph: 'เช่น รพ.สต.บ้าน...' }, { k: 'cert_no', label: 'เลขที่ใบรับรอง CM' },
+    { k: 'bank_name', label: 'ธนาคาร' }, { k: 'bank_account', label: 'เลขที่บัญชี' },
+    { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['active', 'ปฏิบัติงาน'], ['inactive', 'พ้นสภาพ']] }
+  ], c, 'c3'), foot: `${c.id && can(['admin']) ? '<button class="btn btn-d" data-del>ลบ</button><span class="grow"></span>' : ''}<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก</button>` });
+  $('[data-save]', m).onclick = run(async () => { validate(m); await api('cm.save', Object.assign(readForm(m), { id: c.id })); closeModal(m); toast('บันทึกแล้ว'); refresh(); });
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบ Care Manager นี้?', 'ลบ', true))) return; await api('cm.delete', { id: c.id }); closeModal(m); refresh(); });
+};
+
+// =====================================================================
+//  Care Plan
+// =====================================================================
+const PLAN_TEMPLATES = [
+  ['ด้านร่างกาย', 'วัดสัญญาณชีพ ประเมินอาการทั่วไป', 'CG'],
+  ['ด้านร่างกาย', 'ดูแลความสะอาดร่างกาย อาบน้ำ/เช็ดตัว สระผม', 'CG'],
+  ['ด้านร่างกาย', 'พลิกตะแคงตัว ป้องกันแผลกดทับ', 'CG'],
+  ['ด้านร่างกาย', 'ทำแผล/ดูแลแผลกดทับ', 'CG'],
+  ['ด้านร่างกาย', 'ดูแลการขับถ่าย/สายสวนปัสสาวะ', 'CG'],
+  ['ด้านร่างกาย', 'ดูแลการรับประทานยาตามแผนการรักษา', 'CG'],
+  ['ด้านโภชนาการ', 'ดูแลการรับประทานอาหาร/ให้อาหารทางสายยาง', 'CG'],
+  ['ด้านการฟื้นฟู', 'ฟื้นฟูสมรรถภาพ ทำกายภาพบำบัดเบื้องต้น', 'CG'],
+  ['ด้านการฟื้นฟู', 'ออกกำลังกาย ป้องกันข้อติดแข็ง', 'CG'],
+  ['ด้านจิตใจและสังคม', 'พูดคุยให้กำลังใจ กระตุ้นการรับรู้', 'CG'],
+  ['ด้านสิ่งแวดล้อม', 'จัดสภาพแวดล้อมให้ปลอดภัย ป้องกันการพลัดตกหกล้ม', 'CG'],
+  ['บริการวิชาชีพ', 'เยี่ยมบ้านโดยพยาบาล/นักกายภาพบำบัด', 'รพ.สต.'],
+  ['บริการวิชาชีพ', 'ติดตามประเมินผลการดูแลโดย Care Manager', 'CM'],
+  ['อุปกรณ์', 'จัดหาอุปกรณ์ (ที่นอนลม/รถเข็น/ไม้เท้า/ผ้าอ้อม)', 'อปท.']
+];
+const GROUP_TPL = { 1: [0, 5, 8, 9, 10, 12], 2: [0, 5, 8, 9, 10, 12], 3: [0, 1, 2, 4, 5, 6, 7, 11, 12, 13], 4: [0, 1, 2, 3, 4, 5, 6, 9, 11, 12, 13] };
+const CATS = ['ด้านร่างกาย', 'ด้านโภชนาการ', 'ด้านการฟื้นฟู', 'ด้านจิตใจและสังคม', 'ด้านสิ่งแวดล้อม', 'บริการวิชาชีพ', 'อุปกรณ์', 'อื่นๆ'];
+const RESP = ['CG', 'CM', 'รพ.สต.', 'อปท.', 'ครอบครัว', 'อสม.'];
+
+async function vCareplans() {
+  const st = S.state.plans = S.state.plans || { status: '', cg_id: '' };
+  const cgs = isStaff() || can(['viewer']) ? await api('cg.list') : [];
+  V.innerHTML = `<div class="filters">
+      <select id="cps" style="width:auto">${opts([['', 'ทุกสถานะ'], ['draft', 'ร่าง'], ['approved', 'อนุมัติแล้ว'], ['active', 'ดำเนินการ'], ['closed', 'ปิดแผน']], st.status)}</select>
+      ${cgs.length ? `<select id="cpcg" style="width:auto"><option value="">CG ทุกคน</option>${opts(cgs.map((c) => [c.id, c.full_name]), st.cg_id)}</select>` : ''}
+      <input type="search" id="cpq" placeholder="ค้นหาชื่อผู้รับบริการ / เลขที่แผน">
+      <span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="planNew">+ จัดทำ Care Plan</button>' : ''}${exportBtns('plans')}
+    </div><div id="cplist"></div>`;
+  $('#cps').onchange = () => { st.status = $('#cps').value; loadPlans(); };
+  if ($('#cpcg')) $('#cpcg').onchange = () => { st.cg_id = $('#cpcg').value; loadPlans(); };
+  $('#cpq').oninput = () => filterPlans();
+  S.exportParams = () => ({ status: st.status, cg_id: st.cg_id });
+  await loadPlans();
+}
+async function loadPlans() {
+  S.state.planRows = await api('plans.list', S.state.plans);
+  filterPlans();
+}
+function filterPlans() {
+  const q = ($('#cpq') ? $('#cpq').value : '').trim();
+  const rows = (S.state.planRows || []).filter((p) => !q || fname(p.persons).includes(q) || String(p.plan_no || '').includes(q));
+  $('#cplist').innerHTML = tableHtml([
+    { h: 'เลขที่แผน', f: (p) => `<b>${esc(p.plan_no || '-')}</b><div class="xs muted">ฉบับที่ ${p.version}</div>` },
+    { h: 'ผู้รับบริการ', f: (p) => `${esc(fname(p.persons))}<div class="xs muted">หมู่ ${esc(p.persons ? p.persons.moo || '-' : '-')} · อายุ ${age(p.persons && p.persons.birth_date)}</div>` },
+    { h: 'ADL / กลุ่ม', f: (p) => `${p.adl_score == null ? '-' : p.adl_score} ${groupTag(p.ltc_group)}` },
+    { h: 'CM', f: (p) => esc(p.care_managers ? p.care_managers.full_name : '-') },
+    { h: 'CG', f: (p) => esc(p.caregivers ? p.caregivers.full_name : '-') },
+    { h: 'ระยะเวลา', f: (p) => `<span class="small">${thDate(p.start_date)} - ${thDate(p.end_date)}</span>` },
+    { h: 'งบประมาณ', f: (p) => money(p.budget), cls: 'right' },
+    { h: 'สถานะ', f: (p) => tag(p.status) }
+  ], rows, { rowAct: 'planOpen', empty: 'ยังไม่มี Care Plan' });
+}
+
+H.planNew = (d) => planEditor({ person_id: d.person }, d.label);
+H.planOpen = async (d) => {
+  const p = await api('plans.get', { id: d.id });
+  const monthly = p.items.reduce((s, i) => s + i.times_per_month * i.unit_cost, 0);
+  const st = p.status;
+  const btn = (cls, attr, label) => `<button class="btn ${cls}" ${attr}>${label}</button>`;
+  const m = openModal({ title: `Care Plan ${p.plan_no || ''}`, wide: true, body: `
+    <div class="row mb"><h3 class="grow" style="font-size:19px">${esc(fname(p.persons))}</h3>${tag(st)} <span class="tag">ฉบับที่ ${p.version}</span></div>
+    <div class="grid g2">
+      <dl class="kv"><dt>เลขบัตร</dt><dd>${esc(p.persons.cid || '-')}</dd><dt>อายุ / หมู่</dt><dd>${age(p.persons.birth_date)} ปี · หมู่ ${esc(p.persons.moo || '-')}</dd>
+        <dt>ADL / กลุ่ม</dt><dd>${p.adl_score == null ? '-' : p.adl_score} คะแนน ${groupTag(p.ltc_group)}</dd><dt>ระยะเวลาแผน</dt><dd>${thDate(p.start_date)} - ${thDate(p.end_date)}</dd></dl>
+      <dl class="kv"><dt>Care Manager</dt><dd>${esc(p.care_managers ? p.care_managers.full_name : '-')}</dd><dt>Caregiver</dt><dd>${esc(p.caregivers ? p.caregivers.full_name : '-')}</dd>
+        <dt>งบประมาณ</dt><dd><b>${money(p.budget)}</b> บาท (${money(monthly)}/เดือน)</dd><dt>อนุมัติโดย</dt><dd>${esc(p.approved_by || '-')} ${p.approved_at ? thDate(p.approved_at) : ''}</dd></dl>
+    </div>
+    <div class="grid g2 mt"><div class="card"><h3>ปัญหา / ความต้องการ</h3><div class="small" style="white-space:pre-wrap">${esc(p.problems || '-')}</div></div>
+      <div class="card"><h3>เป้าหมายการดูแล</h3><div class="small" style="white-space:pre-wrap">${esc(p.goals || '-')}</div></div></div>
+    <h3 class="mt mb">กิจกรรมการดูแล</h3>
+    ${tableHtml([{ h: 'ด้าน', f: (i) => esc(i.category || '') }, { h: 'กิจกรรม', f: (i) => esc(i.activity) }, { h: 'ครั้ง/เดือน', f: (i) => i.times_per_month, cls: 'center' },
+      { h: 'บาท/ครั้ง', f: (i) => money(i.unit_cost), cls: 'right' }, { h: 'รวม/เดือน', f: (i) => money(i.times_per_month * i.unit_cost), cls: 'right' }, { h: 'ผู้รับผิดชอบ', f: (i) => esc(i.responsible || '') }], p.items)}
+    ${p.revisions.length ? `<h3 class="mt mb">ประวัติการปรับแก้ Care Plan</h3>${tableHtml([{ h: 'ฉบับเดิม', f: (r) => r.version, cls: 'center' }, { h: 'วันที่ปรับ', f: (r) => thDate(r.created_at) },
+      { h: 'เหตุผล', f: (r) => esc(r.reason) }, { h: 'ผู้ปรับ', f: (r) => esc(r.changed_by || '') }], p.revisions, { rowAct: 'planRevision' })}` : ''}
+    <div class="small muted mt">บันทึกการเยี่ยมตามแผนนี้ ${p.visit_count} ครั้ง</div>`,
+    foot: `${exportBtns('careplan', { xlsx: false, params: { id: p.id } })}<span class="grow"></span>
+      ${isStaff() && st === 'draft' ? btn('btn-d', 'data-x="delete"', 'ลบร่าง') : ''}
+      ${isStaff() && st !== 'closed' ? btn('btn-o', 'data-x="edit"', st === 'draft' ? 'แก้ไข' : 'ปรับแก้แผน') : ''}
+      ${isStaff() && st === 'draft' ? btn('btn-p', 'data-x="approved"', 'อนุมัติแผน') : ''}
+      ${isStaff() && st === 'approved' ? btn('btn-p', 'data-x="active"', 'เริ่มดำเนินการ') : ''}
+      ${isStaff() && (st === 'active' || st === 'approved') ? btn('btn-o', 'data-x="closed"', 'ปิดแผน') : ''}
+      ${(st === 'active' || st === 'approved') && can(['admin', 'cm', 'cg']) ? `<button class="btn btn-g" data-act="visitNew" data-plan="${p.id}">บันทึกการเยี่ยม</button>` : ''}` });
+  $$('[data-x]', m).forEach((b) => { b.onclick = run(async () => {
+    const x = b.dataset.x;
+    if (x === 'edit') { closeModal(m); return planEditor(p, fname(p.persons)); }
+    if (x === 'delete') { if (!(await askConfirm('ลบ Care Plan ฉบับร่างนี้?', 'ลบ', true))) return; await api('plans.delete', { id: p.id }); }
+    else {
+      const label = { approved: 'อนุมัติ', active: 'เริ่มดำเนินการ', closed: 'ปิด' }[x];
+      if (!(await askConfirm(`${label} Care Plan ${p.plan_no}?`, label))) return;
+      await api('plans.status', { id: p.id, status: x });
+    }
+    closeModal(m); toast('บันทึกแล้ว'); if (S.view === 'careplans') loadPlans();
+  }); });
+};
+H.planRevision = async (d) => {
+  const r = await api('plans.revision', { id: d.id });
+  const s = r.snapshot;
+  openModal({ title: `Care Plan ฉบับที่ ${r.version} (ก่อนปรับแก้)`, wide: true, body: `
+    <div class="warn mb">เหตุผลการปรับแก้: ${esc(r.reason)} — โดย ${esc(r.changed_by || '')} ${thDate(r.created_at)}</div>
+    <dl class="kv"><dt>ระยะเวลา</dt><dd>${thDate(s.start_date)} - ${thDate(s.end_date)}</dd><dt>CG</dt><dd>${esc(s.caregivers ? s.caregivers.full_name : '-')}</dd>
+      <dt>งบประมาณ</dt><dd>${money(s.budget)}</dd><dt>ปัญหา</dt><dd style="white-space:pre-wrap">${esc(s.problems || '-')}</dd><dt>เป้าหมาย</dt><dd style="white-space:pre-wrap">${esc(s.goals || '-')}</dd></dl>
+    <h3 class="mt mb">กิจกรรม</h3>${tableHtml([{ h: 'ด้าน', f: (i) => esc(i.category || '') }, { h: 'กิจกรรม', f: (i) => esc(i.activity) }, { h: 'ครั้ง/เดือน', f: (i) => i.times_per_month }, { h: 'บาท/ครั้ง', f: (i) => money(i.unit_cost) }, { h: 'ผู้รับผิดชอบ', f: (i) => esc(i.responsible || '') }], s.items || [])}` });
+};
+
+async function planEditor(plan, label) {
+  const [cms, cgs] = await Promise.all([api('cm.list'), api('cg.list')]);
+  const rates = S.settings.rates || {};
+  const isNew = !plan.id;
+  const needReason = !isNew && plan.status !== 'draft';
+  const p = Object.assign({ start_date: today(), cm_id: S.user.care_manager_id || '' }, plan);
+  if (!p.end_date) p.end_date = addYear(p.start_date);
+  const m = openModal({ title: isNew ? 'จัดทำ Care Plan' : needReason ? `ปรับแก้ Care Plan ${p.plan_no} (จะบันทึกเป็นฉบับที่ ${p.version + 1})` : `แก้ไข Care Plan ${p.plan_no}`, wide: true, body: `
+    ${needReason ? '<div class="warn mb">แผนนี้อนุมัติแล้ว การแก้ไขจะเก็บฉบับเดิมไว้ในประวัติ และต้องระบุเหตุผลการปรับแก้</div>' : ''}
+    <div class="form c3">
+      ${isNew ? fieldHtml({ k: 'person_id', label: 'ผู้รับบริการ', type: 'person', display: label, span: true }, p.person_id) : `<div class="f span"><label>ผู้รับบริการ</label><b>${esc(label)}</b><input type="hidden" name="person_id" value="${p.person_id}"></div>`}
+      <input type="hidden" name="adl_id" value="${esc(p.adl_id || '')}">
+      ${fieldHtml({ k: 'adl_score', label: 'คะแนน ADL', type: 'number', attrs: 'min="0" max="20"' }, p.adl_score == null ? '' : p.adl_score)}
+      ${fieldHtml({ k: 'ltc_group', label: 'กลุ่มชุดสิทธิประโยชน์', type: 'select', options: [[1, 'กลุ่ม 1'], [2, 'กลุ่ม 2'], [3, 'กลุ่ม 3'], [4, 'กลุ่ม 4']] }, p.ltc_group)}
+      <div class="f"><label>&nbsp;</label><div class="xs muted" data-adlinfo></div></div>
+      ${fieldHtml({ k: 'cm_id', label: 'Care Manager', type: 'select', options: cms.filter((x) => x.status === 'active' || x.id === p.cm_id).map((x) => [x.id, x.full_name]) }, p.cm_id)}
+      ${fieldHtml({ k: 'cg_id', label: 'Caregiver ผู้ดูแล', type: 'select', options: cgs.filter((x) => x.status === 'active' || x.id === p.cg_id).map((x) => [x.id, `${x.full_name} (ดูแล ${x.case_count} คน)`]) }, p.cg_id)}
+      <div></div>
+      ${fieldHtml({ k: 'start_date', label: 'วันเริ่มแผน', type: 'date', req: true }, p.start_date)}
+      ${fieldHtml({ k: 'end_date', label: 'วันสิ้นสุดแผน', type: 'date' }, p.end_date)}
+      <div></div>
+      ${fieldHtml({ k: 'problems', label: 'ปัญหา / ความต้องการของผู้รับบริการ', type: 'textarea', span: true, ph: 'เช่น ช่วยเหลือตัวเองได้น้อย มีแผลกดทับที่ก้นกบ ผู้ดูแลหลักขาดทักษะ...' }, p.problems)}
+      ${fieldHtml({ k: 'goals', label: 'เป้าหมายการดูแล', type: 'textarea', span: true, ph: 'เช่น ไม่เกิดแผลกดทับใหม่ แผลเดิมหายภายใน 3 เดือน คะแนน ADL ไม่ลดลง...' }, p.goals)}
+    </div>
+    <div class="row mt mb"><h3 class="grow">กิจกรรมการดูแลตามชุดสิทธิประโยชน์</h3>
+      <button class="btn btn-g btn-sm" data-tpl>เติมกิจกรรมมาตรฐานตามกลุ่ม</button><button class="btn btn-o btn-sm" data-add>+ เพิ่มกิจกรรม</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>ด้าน</th><th style="min-width:240px">กิจกรรม</th><th>ครั้ง/เดือน</th><th>บาท/ครั้ง</th><th>ผู้รับผิดชอบ</th><th class="right">รวม/เดือน</th><th></th></tr></thead><tbody data-items></tbody></table></div>
+    <datalist id="actList">${PLAN_TEMPLATES.map((t) => `<option value="${esc(t[1])}">`).join('')}</datalist>
+    <div class="row mt" data-total></div>
+    ${needReason ? `<div class="f mt"><label>เหตุผลการปรับแก้ Care Plan <span class="req">*</span></label><textarea data-reason rows="2" placeholder="เช่น ผลประเมิน ADL เปลี่ยนแปลง / เปลี่ยน CG / ผู้รับบริการมีแผลกดทับใหม่"></textarea></div>` : ''}`,
+    foot: `<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก Care Plan</button>` });
+
+  const tbody = $('[data-items]', m);
+  const rowHtml = (i) => `<tr><td><select data-k="category">${opts(CATS, i.category)}</select></td>
+    <td><input type="text" data-k="activity" list="actList" value="${esc(i.activity || '')}"></td>
+    <td><input type="number" data-k="times_per_month" min="0" value="${i.times_per_month == null ? 4 : i.times_per_month}" style="width:80px"></td>
+    <td><input type="number" data-k="unit_cost" min="0" step="0.01" value="${i.unit_cost == null ? 0 : i.unit_cost}" style="width:100px"></td>
+    <td><select data-k="responsible">${opts(RESP, i.responsible || 'CG')}</select></td><td class="right nowrap" data-sub></td>
+    <td><button class="btn-x" data-rm title="ลบ">✕</button></td></tr>`;
+  const addRows = (list) => { tbody.insertAdjacentHTML('beforeend', list.map(rowHtml).join('')); calc(); };
+  const readItems = () => $$('tr', tbody).map((tr) => Object.fromEntries($$('[data-k]', tr).map((el) => [el.dataset.k, el.value.trim()]))).filter((i) => i.activity);
+  const months = () => {
+    const a = $('[name=start_date]', m).value, b = $('[name=end_date]', m).value;
+    if (!a || !b) return 12;
+    const d1 = new Date(a), d2 = new Date(b);
+    return Math.max(1, (d2.getFullYear() - d1.getFullYear()) * 12 + d2.getMonth() - d1.getMonth() + (d2.getDate() >= d1.getDate() ? 1 : 0));
+  };
+  function calc() {
+    let monthly = 0;
+    $$('tr', tbody).forEach((tr) => {
+      const sub = Number($('[data-k=times_per_month]', tr).value || 0) * Number($('[data-k=unit_cost]', tr).value || 0);
+      monthly += sub; $('[data-sub]', tr).textContent = money(sub);
+    });
+    const g = $('[name=ltc_group]', m).value;
+    const ceil = g ? Number((rates.group_budget || {})[g] || rates.fund_per_person_year || 0) : 0;
+    const total = monthly * months();
+    $('[data-total]', m).innerHTML = `<span>รวมต่อเดือน <b>${money(monthly)}</b> บาท × ${months()} เดือน = <b style="font-size:17px">${money(total)}</b> บาท</span>
+      ${ceil ? `<span class="tag ${total > ceil ? 't-red' : 't-green'}">เพดานกลุ่ม ${g}: ${money(ceil)} บาท/ปี ${total > ceil ? '— เกินเพดาน' : ''}</span>` : ''}`;
+  }
+  tbody.addEventListener('input', calc);
+  tbody.addEventListener('click', (e) => { if (e.target.closest('[data-rm]')) { e.target.closest('tr').remove(); calc(); } });
+  ['start_date', 'end_date', 'ltc_group'].forEach((k) => { $(`[name=${k}]`, m).addEventListener('change', calc); });
+  $('[data-add]', m).onclick = () => addRows([{ responsible: 'CG', unit_cost: rates.cg_rate_per_visit || 0 }]);
+  $('[data-tpl]', m).onclick = () => {
+    const g = $('[name=ltc_group]', m).value;
+    if (!g) return toast('กรุณาเลือกกลุ่มชุดสิทธิประโยชน์ก่อน', true);
+    const existing = readItems().map((i) => i.activity);
+    addRows(GROUP_TPL[g].map((i) => PLAN_TEMPLATES[i]).filter((t) => !existing.includes(t[1])).map(([category, activity, responsible]) => ({
+      category, activity, responsible, times_per_month: responsible === 'CG' ? (g >= 3 ? 8 : 4) : 1, unit_cost: responsible === 'CG' ? (rates.cg_rate_per_visit || 0) : 0
+    })));
+  };
+  // เลือกผู้รับบริการ -> ดึงผล ADL ล่าสุด
+  const loadAdlInfo = run(async (pid) => {
+    const a = await api('adl.latest', { person_id: pid }, true);
+    if (!a) { $('[data-adlinfo]', m).innerHTML = '<span class="tag t-amber">ยังไม่มีผลประเมิน ADL</span>'; return; }
+    $('[name=adl_id]', m).value = a.id; $('[name=adl_score]', m).value = a.total_score;
+    if (a.ltc_group) $('[name=ltc_group]', m).value = a.ltc_group;
+    $('[data-adlinfo]', m).innerHTML = `ADL ล่าสุด ${thDate(a.assess_date)}: <b>${a.total_score}</b> ${levelTag(a.dependency_level)}`;
+    calc();
+  });
+  m.addEventListener('pp-change', (e) => loadAdlInfo(e.detail.id));
+  if (isNew && p.person_id) loadAdlInfo(p.person_id);
+  addRows(plan.items && plan.items.length ? plan.items : []);
+  calc();
+
+  $('[data-save]', m).onclick = run(async () => {
+    validate(m);
+    const f = readForm(m);
+    if (!f.person_id) throw new Error('กรุณาเลือกผู้รับบริการ');
+    const reason = needReason ? $('[data-reason]', m).value.trim() : '';
+    if (needReason && !reason) throw new Error('กรุณาระบุเหตุผลการปรับแก้ Care Plan');
+    const saved = await api('plans.save', { plan: Object.assign(f, { id: plan.id }), items: readItems(), reason });
+    closeModal(m);
+    toast(saved.warning ? saved.warning : `บันทึก Care Plan ${saved.plan_no} แล้ว`, !!saved.warning);
+    if (S.view === 'careplans') loadPlans();
+    H.planOpen({ id: saved.id });
+  });
+}
+
+// =====================================================================
+//  CG Visits — การปฏิบัติงานตาม Care Plan + แนบรูปภาพ
+// =====================================================================
+async function vVisits() {
+  const st = S.state.visits = S.state.visits || { from: today().slice(0, 8) + '01', to: today(), status: '', cg_id: '', page: 1, size: 50 };
+  const cgs = isStaff() || can(['viewer']) ? await api('cg.list') : [];
+  V.innerHTML = `<div class="filters">
+      <span class="small muted">วันที่</span><input type="date" id="vf" value="${st.from}" style="width:auto"><input type="date" id="vt" value="${st.to}" style="width:auto">
+      <select id="vs" style="width:auto">${opts([['', 'ทุกสถานะ'], ['submitted', 'รอตรวจสอบ'], ['verified', 'ตรวจแล้ว'], ['rejected', 'ส่งกลับแก้ไข']], st.status)}</select>
+      ${cgs.length ? `<select id="vcg" style="width:auto"><option value="">CG ทุกคน</option>${opts(cgs.map((c) => [c.id, c.full_name]), st.cg_id)}</select>` : ''}
+      <span class="grow"></span>
+      ${isStaff() ? '<button class="btn btn-o" data-act="visitBulk" data-status="verified">✓ ตรวจผ่านที่เลือก</button>' : ''}
+      ${can(['admin', 'cm', 'cg']) ? `<button class="btn btn-p" data-act="visitNew">${icon('camera')} บันทึกการเยี่ยม</button>` : ''}
+      ${exportBtns('visits')}
+    </div><div id="vlist"></div>`;
+  const upd = () => { st.from = $('#vf').value; st.to = $('#vt').value; st.status = $('#vs').value; st.cg_id = $('#vcg') ? $('#vcg').value : ''; st.page = 1; loadVisits(); };
+  ['#vf', '#vt', '#vs', '#vcg'].forEach((s) => { if ($(s)) $(s).onchange = upd; });
+  S.exportParams = () => ({ from: st.from, to: st.to, status: st.status, cg_id: st.cg_id });
+  S.loaders.visits = run(loadVisits);
+  await loadVisits();
+}
+async function loadVisits() {
+  const r = await api('visits.list', S.state.visits);
+  $('#vlist').innerHTML = tableHtml([
+    ...(isStaff() ? [{ h: '<input type="checkbox" data-all>', f: (v) => `<input type="checkbox" data-vid="${v.id}">` }] : []),
+    { h: 'วันที่', f: (v) => `${thDate(v.visit_date)}<div class="xs muted">${(v.start_time || '').slice(0, 5)}${v.end_time ? '-' + v.end_time.slice(0, 5) : ''}</div>` },
+    { h: 'ผู้รับบริการ', f: (v) => `<b>${esc(fname(v.persons))}</b><div class="xs muted">หมู่ ${esc(v.persons ? v.persons.moo || '-' : '-')} · ${esc(v.care_plans ? v.care_plans.plan_no : '')}</div>` },
+    { h: 'CG', f: (v) => esc(v.caregivers ? v.caregivers.full_name : '') },
+    { h: 'กิจกรรม', f: (v) => { const a = v.activities || []; return `${a.filter((x) => x.done).length}/${a.length}`; }, cls: 'center' },
+    { h: 'รูป', f: (v) => ((v.visit_photos || []).length ? `📷 ${(v.visit_photos || []).length}` : '-'), cls: 'center' },
+    { h: 'บันทึก', f: (v) => `<span class="small">${esc((v.notes || '').slice(0, 80))}</span>` },
+    { h: 'สถานะ', f: (v) => tag(v.status) }
+  ], r.rows, { rowAct: 'visitOpen', empty: 'ไม่มีบันทึกการเยี่ยมในช่วงนี้' }) + pager(r, 'visits');
+  const all = $('#vlist [data-all]');
+  if (all) all.onchange = () => $$('#vlist [data-vid]').forEach((c) => { c.checked = all.checked; });
+}
+H.visitBulk = async (d) => {
+  const ids = $$('#vlist [data-vid]:checked').map((c) => c.dataset.vid);
+  if (!ids.length) return toast('กรุณาเลือกรายการ', true);
+  await api('visits.verify', { ids, status: d.status });
+  toast(`ตรวจสอบแล้ว ${ids.length} รายการ`); loadVisits();
+};
+H.visitOpen = async (d) => {
+  const v = await api('visits.get', { id: d.id });
+  const vt = v.vitals || {};
+  const own = S.user.role !== 'cg' || v.status !== 'verified';
+  const m = openModal({ title: 'บันทึกการปฏิบัติงานของ Caregiver', wide: true, body: `
+    <div class="row mb"><h3 class="grow" style="font-size:18px">${esc(fname(v.persons))}</h3>${tag(v.status)}</div>
+    <dl class="kv"><dt>วันที่ / เวลา</dt><dd>${thDate(v.visit_date)} ${(v.start_time || '').slice(0, 5)} - ${(v.end_time || '').slice(0, 5)}</dd>
+      <dt>Caregiver</dt><dd>${esc(v.caregivers ? v.caregivers.full_name : '-')}</dd><dt>Care Plan</dt><dd>${esc(v.care_plans ? v.care_plans.plan_no : '-')}</dd>
+      <dt>สัญญาณชีพ</dt><dd>BP ${esc(vt.bp || '-')} · ชีพจร ${esc(vt.pulse || '-')} · T ${esc(vt.temp || '-')} · DTX ${esc(vt.dtx || '-')} · น้ำหนัก ${esc(vt.weight || '-')}</dd>
+      ${v.lat ? `<dt>พิกัด</dt><dd><a href="https://maps.google.com/?q=${v.lat},${v.lng}" target="_blank" rel="noopener">${v.lat.toFixed(5)}, ${v.lng.toFixed(5)}</a></dd>` : ''}
+      ${v.verified_by ? `<dt>ตรวจสอบโดย</dt><dd>${esc(v.verified_by)} ${thDate(v.verified_at)}</dd>` : ''}</dl>
+    <h3 class="mt mb">กิจกรรมตาม Care Plan</h3>
+    <div class="grid g2">${(v.activities || []).map((a) => `<div class="small">${a.done ? '✅' : '⬜'} ${esc(a.activity)}</div>`).join('') || '<span class="muted">-</span>'}</div>
+    <div class="grid g2 mt"><div class="card"><h3>บันทึกการดูแล</h3><div class="small" style="white-space:pre-wrap">${esc(v.notes || '-')}</div></div>
+      <div class="card"><h3>ปัญหาที่พบ / ส่งต่อ</h3><div class="small" style="white-space:pre-wrap">${esc(v.problems || '-')}</div></div></div>
+    <h3 class="mt mb">รูปภาพประกอบ (${v.photos.length})</h3>
+    <div class="photos">${v.photos.map((p) => `<div class="photo"><img src="${esc(p.url)}" alt="${esc(p.caption || 'รูปการปฏิบัติงาน')}" data-zoom="${esc(p.url)}" loading="lazy"></div>`).join('') || '<span class="muted small">ไม่มีรูปภาพ</span>'}</div>`,
+    foot: `${exportBtns('visit', { xlsx: false, params: { id: v.id } })}<span class="grow"></span>
+      ${own && can(['admin', 'cm', 'cg']) ? '<button class="btn btn-d" data-del>ลบ</button><button class="btn btn-o" data-edit>แก้ไข</button>' : ''}
+      ${isStaff() ? '<button class="btn btn-d" data-v="rejected">ส่งกลับแก้ไข</button><button class="btn btn-p" data-v="verified">✓ ตรวจสอบผ่าน</button>' : ''}` });
+  $$('[data-zoom]', m).forEach((img) => { img.onclick = () => openModal({ title: 'รูปภาพ', wide: true, body: `<img src="${img.dataset.zoom}" style="width:100%;border-radius:8px" alt="">` }); });
+  $$('[data-v]', m).forEach((b) => { b.onclick = run(async () => { await api('visits.verify', { id: v.id, status: b.dataset.v }); closeModal(m); toast('บันทึกผลการตรวจแล้ว'); if (S.view === 'visits') loadVisits(); }); });
+  const ed = $('[data-edit]', m); if (ed) ed.onclick = () => { closeModal(m); visitForm(v.care_plan_id, v); };
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบบันทึกการเยี่ยมนี้และรูปภาพทั้งหมด?', 'ลบ', true))) return; await api('visits.delete', { id: v.id }); closeModal(m); toast('ลบแล้ว'); refresh(); });
+};
+H.visitNew = (d) => visitForm(d.plan || '', null);
+
+async function visitForm(planId, visit) {
+  const v = visit || { visit_date: today(), start_time: new Date().toTimeString().slice(0, 5), vitals: {}, activities: [] };
+  const plans = (await api('plans.list', {})).filter((p) => ['approved', 'active'].includes(p.status) || p.id === planId);
+  if (!plans.length) throw new Error('ยังไม่มี Care Plan ที่อนุมัติแล้วสำหรับบันทึกการเยี่ยม');
+  const vt = v.vitals || {};
+  const m = openModal({ title: visit ? 'แก้ไขบันทึกการเยี่ยม' : 'บันทึกการปฏิบัติงานตาม Care Plan', wide: true, body: `
+    <div class="form c3">
+      <div class="f span"><label>Care Plan / ผู้รับบริการ <span class="req">*</span></label><select name="care_plan_id" required ${visit ? 'disabled' : ''}>
+        <option value="">— เลือก —</option>${opts(plans.map((p) => [p.id, `${fname(p.persons)} · หมู่ ${p.persons.moo || '-'} · ${p.plan_no}`]), planId)}</select></div>
+      ${fieldHtml({ k: 'visit_date', label: 'วันที่เยี่ยม', type: 'date', req: true }, v.visit_date)}
+      ${fieldHtml({ k: 'start_time', label: 'เวลาเริ่ม', type: 'time' }, (v.start_time || '').slice(0, 5))}
+      ${fieldHtml({ k: 'end_time', label: 'เวลาสิ้นสุด', type: 'time' }, (v.end_time || '').slice(0, 5))}
+    </div>
+    <h3 class="mt mb">สัญญาณชีพ</h3>
+    <div class="form c3" data-vitals>
+      ${fieldHtml({ k: 'bp', label: 'ความดัน (BP)', ph: '120/80' }, vt.bp)}${fieldHtml({ k: 'pulse', label: 'ชีพจร (ครั้ง/นาที)', type: 'number' }, vt.pulse)}
+      ${fieldHtml({ k: 'temp', label: 'อุณหภูมิ (°C)', type: 'number', attrs: 'step="0.1"' }, vt.temp)}${fieldHtml({ k: 'dtx', label: 'น้ำตาลปลายนิ้ว (DTX)', type: 'number' }, vt.dtx)}
+      ${fieldHtml({ k: 'weight', label: 'น้ำหนัก (กก.)', type: 'number', attrs: 'step="0.1"' }, vt.weight)}
+    </div>
+    <h3 class="mt mb">กิจกรรมที่ดำเนินการตาม Care Plan</h3>
+    <div class="grid g2" data-acts><span class="muted small">เลือก Care Plan เพื่อแสดงรายการกิจกรรม</span></div>
+    <div class="form mt">
+      ${fieldHtml({ k: 'notes', label: 'บันทึกการดูแล / อาการผู้รับบริการ', type: 'textarea', span: true }, v.notes)}
+      ${fieldHtml({ k: 'problems', label: 'ปัญหาที่พบ / ต้องการส่งต่อ CM', type: 'textarea', span: true }, v.problems)}
+    </div>
+    <input type="hidden" name="lat" value="${esc(v.lat || '')}"><input type="hidden" name="lng" value="${esc(v.lng || '')}">
+    <div class="row mt"><button class="btn btn-o btn-sm" data-gps>📍 บันทึกพิกัดปัจจุบัน</button><span class="small muted" data-gpsinfo>${v.lat ? `${v.lat}, ${v.lng}` : ''}</span></div>
+    <h3 class="mt mb">แนบรูปภาพการปฏิบัติงาน</h3>
+    <div class="photos mb" data-old>${(v.photos || []).map((p) => `<div class="photo"><img src="${esc(p.url)}" alt=""><button class="del" data-delphoto="${p.id}" title="ลบรูป">✕</button></div>`).join('')}</div>
+    <label class="btn btn-g" style="display:inline-flex">📷 เลือก/ถ่ายรูป<input type="file" accept="image/*" multiple data-files hidden></label>
+    <span class="xs muted">สูงสุด 10 รูปต่อครั้ง · ระบบย่อขนาดรูปอัตโนมัติ</span>
+    <div class="photos mt" data-new></div>
+    <div class="small muted mt" data-progress></div>`,
+    foot: `<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึกการเยี่ยม</button>` });
+
+  const files = [];
+  const actBox = $('[data-acts]', m);
+  const loadActs = run(async (pid) => {
+    if (!pid) return;
+    const p = await api('plans.get', { id: pid }, true);
+    const done = Object.fromEntries((v.activities || []).map((a) => [a.item_id || a.activity, a.done]));
+    actBox.innerHTML = p.items.map((i) => `<label class="chk card" style="padding:8px 10px"><input type="checkbox" data-item="${i.id}" data-name="${esc(i.activity)}"
+      ${done[i.id] || done[i.activity] || (!visit && i.responsible === 'CG') ? 'checked' : ''}> <span>${esc(i.activity)} <span class="xs muted">(${esc(i.responsible || '')})</span></span></label>`).join('')
+      || '<span class="muted small">แผนนี้ยังไม่มีกิจกรรม</span>';
+  });
+  $('[name=care_plan_id]', m).onchange = (e) => loadActs(e.target.value);
+  if (planId) loadActs(planId);
+
+  $('[data-gps]', m).onclick = () => {
+    if (!navigator.geolocation) return toast('อุปกรณ์ไม่รองรับการระบุตำแหน่ง', true);
+    navigator.geolocation.getCurrentPosition((pos) => {
+      $('[name=lat]', m).value = pos.coords.latitude.toFixed(6); $('[name=lng]', m).value = pos.coords.longitude.toFixed(6);
+      $('[data-gpsinfo]', m).textContent = `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (±${Math.round(pos.coords.accuracy)} ม.)`;
+    }, (err) => toast('ไม่สามารถระบุตำแหน่งได้: ' + err.message, true), { enableHighAccuracy: true, timeout: 15000 });
+  };
+  $('[data-files]', m).onchange = run(async (e) => {
+    const existing = $$('[data-old] .photo', m).length;
+    for (const f of Array.from(e.target.files)) {
+      if (files.length + existing >= 10) { toast('แนบรูปได้สูงสุด 10 รูป', true); break; }
+      const data = await compressImage(f);
+      files.push(data);
+      $('[data-new]', m).insertAdjacentHTML('beforeend', `<div class="photo"><img src="${data}" alt=""><button class="del" data-rmnew="${files.length - 1}" title="ลบ">✕</button></div>`);
+    }
+    e.target.value = '';
+  });
+  m.addEventListener('click', run(async (e) => {
+    const rn = e.target.closest('[data-rmnew]');
+    if (rn) { files[+rn.dataset.rmnew] = null; rn.parentElement.remove(); }
+    const dp = e.target.closest('[data-delphoto]');
+    if (dp && (await askConfirm('ลบรูปนี้?', 'ลบ', true))) { await api('visits.photo.delete', { id: dp.dataset.delphoto }); dp.parentElement.remove(); }
+  }));
+
+  $('[data-save]', m).onclick = run(async () => {
+    validate(m);
+    const f = readForm(m);
+    const vitals = readForm($('[data-vitals]', m));
+    const activities = $$('[data-item]', m).map((c) => ({ item_id: c.dataset.item, activity: c.dataset.name, done: c.checked }));
+    const btn = $('[data-save]', m); btn.disabled = true;
+    try {
+      const saved = await api('visits.save', { id: visit && visit.id, care_plan_id: f.care_plan_id || planId, visit_date: f.visit_date, start_time: f.start_time,
+        end_time: f.end_time, vitals, activities, notes: f.notes, problems: f.problems, lat: f.lat, lng: f.lng });
+      const pending = files.filter(Boolean);
+      for (let i = 0; i < pending.length; i++) {
+        $('[data-progress]', m).textContent = `กำลังอัปโหลดรูป ${i + 1}/${pending.length} ...`;
+        await api('visits.photo', { visit_id: saved.id, data: pending[i], mime: 'image/jpeg' });
+      }
+      closeModal(m); toast('บันทึกการเยี่ยมเรียบร้อย');
+      if (S.view === 'visits') loadVisits(); else if (S.view === 'dashboard') refresh();
+    } finally { btn.disabled = false; }
+  });
+}
+
+// =====================================================================
+//  ค่าตอบแทน CG / CM
+// =====================================================================
+async function vPayments() {
+  const isCg = S.user.role === 'cg';
+  const tab = isCg ? 'cg' : S.state.payTab || 'cg';
+  const period = S.state.payPeriod || curMonth();
+  const r = S.settings.rates || {};
+  V.innerHTML = `
+    ${isCg ? '' : `<div class="tabs"><button data-act="payTab" data-tab="cg" class="${tab === 'cg' ? 'on' : ''}">ค่าตอบแทน Caregiver</button>
+      <button data-act="payTab" data-tab="cm" class="${tab === 'cm' ? 'on' : ''}">ค่าตอบแทน Care Manager</button></div>`}
+    <div class="filters"><span class="small muted">งวดเดือน</span><input type="month" id="pp" value="${period}" style="width:auto">
+      ${isStaff() ? `<button class="btn btn-p" data-act="payCalc" data-tab="${tab}">คำนวณค่าตอบแทน</button>` : ''}
+      <span class="grow"></span>
+      ${(tab === 'cg' ? isStaff() : can(['admin'])) ? `<button class="btn btn-o btn-sm" data-act="paySet" data-tab="${tab}" data-status="approved">อนุมัติที่เลือก</button>
+        <button class="btn btn-o btn-sm" data-act="paySet" data-tab="${tab}" data-status="paid">บันทึกจ่ายแล้ว</button>
+        <button class="btn btn-o btn-sm" data-act="paySet" data-tab="${tab}" data-status="draft">กลับเป็นร่าง</button>` : ''}
+      ${exportBtns(tab === 'cg' ? 'pay_cg' : 'pay_cm')}
+    </div>
+    <div class="hint mb">${tab === 'cg'
+      ? `คำนวณจากบันทึกการเยี่ยมที่ <b>ตรวจสอบแล้ว</b> ในงวด · วิธีคิด: ${r.cg_mode === 'per_patient' ? `${money(r.cg_rate_per_patient)} บาท/ผู้รับบริการ/เดือน` : `${money(r.cg_rate_per_visit)} บาท/ครั้ง`} · เพดาน ${money(r.cg_monthly_cap)} บาท/คน/เดือน`
+      : `คำนวณจากจำนวนเคสที่มี Care Plan (อนุมัติ/ดำเนินการ) ในงวด × ${money(r.cm_rate_per_case)} บาท + แผนใหม่ที่อนุมัติในงวด × ${money(r.cm_rate_per_new_plan)} บาท · เพดาน ${money(r.cm_monthly_cap)} บาท/คน/เดือน`}
+      · รายการที่อนุมัติ/จ่ายแล้วจะไม่ถูกคำนวณทับ</div>
+    <div id="paylist"></div>`;
+  $('#pp').onchange = (e) => { S.state.payPeriod = e.target.value; refresh(); };
+  S.exportParams = () => ({ period: S.state.payPeriod || curMonth() });
+  const rows = await api(tab === 'cg' ? 'pay.cg.list' : 'pay.cm.list', { period });
+  renderPay(tab, rows);
+}
+function renderPay(tab, rows) {
+  const total = rows.reduce((s, x) => s + Number(x.amount), 0);
+  const who = (x) => (tab === 'cg' ? x.caregivers : x.care_managers) || {};
+  $('#paylist').innerHTML = tableHtml([
+    { h: '<input type="checkbox" data-all>', f: (x) => `<input type="checkbox" data-pid="${x.id}">` },
+    { h: 'ชื่อ-สกุล', f: (x) => `<b>${esc(who(x).full_name || '-')}</b>` },
+    ...(tab === 'cg'
+      ? [{ h: 'ครั้งที่เยี่ยม', f: (x) => x.visit_count, cls: 'center' }, { h: 'ผู้รับบริการ', f: (x) => x.patient_count, cls: 'center' }, { h: 'อัตรา', f: (x) => `${money(x.rate)} ${x.rate_mode === 'per_visit' ? '/ครั้ง' : '/คน'}`, cls: 'right' }]
+      : [{ h: 'เคสที่ดูแล', f: (x) => x.case_count, cls: 'center' }, { h: 'แผนใหม่', f: (x) => x.new_plan_count, cls: 'center' }]),
+    { h: 'จำนวนเงิน (บาท)', f: (x) => `<b>${money(x.amount)}</b>`, cls: 'right' },
+    { h: 'บัญชีธนาคาร', f: (x) => `<span class="small">${esc([who(x).bank_name, who(x).bank_account].filter(Boolean).join(' ') || '-')}</span>` },
+    { h: 'สถานะ', f: (x) => `${tag(x.status)}${x.paid_at ? `<div class="xs muted">${thDate(x.paid_at)}</div>` : ''}` }
+  ], rows, { empty: 'ยังไม่มีข้อมูลค่าตอบแทนในงวดนี้ — กด "คำนวณค่าตอบแทน"',
+    foot: `<tr><td></td><td><b>รวม ${rows.length} คน</b></td><td colspan="${tab === 'cg' ? 3 : 2}"></td><td class="right"><b>${money(total)}</b></td><td colspan="2"></td></tr>` });
+  const all = $('#paylist [data-all]');
+  if (all) all.onchange = () => $$('#paylist [data-pid]').forEach((c) => { c.checked = all.checked; });
+}
+H.payTab = (d) => { S.state.payTab = d.tab; refresh(); };
+H.payCalc = async (d) => {
+  const period = $('#pp').value;
+  const rows = await api(d.tab === 'cg' ? 'pay.cg.calc' : 'pay.cm.calc', { period });
+  renderPay(d.tab, rows); toast(`คำนวณค่าตอบแทนงวด ${thMonth(period)} แล้ว`);
+};
+H.paySet = async (d) => {
+  const ids = $$('#paylist [data-pid]:checked').map((c) => c.dataset.pid);
+  if (!ids.length) return toast('กรุณาเลือกรายการ', true);
+  await api(d.tab === 'cg' ? 'pay.cg.status' : 'pay.cm.status', { ids, status: d.status });
+  toast('อัปเดตสถานะแล้ว'); refresh();
+};
+
+// =====================================================================
+//  โครงการ
+// =====================================================================
+async function vProjects() {
+  const rows = await api('projects.list');
+  V.innerHTML = `<div class="filters"><span class="grow"></span>${isStaff() ? '<button class="btn btn-p" data-act="projectEdit">+ จัดทำโครงการ</button>' : ''}${exportBtns('projects')}</div>` +
+    tableHtml([
+      { h: 'ปีงบ', f: (p) => esc(p.fiscal_year || ''), cls: 'center' },
+      { h: 'ชื่อโครงการ', f: (p) => `<b>${esc(p.title)}</b><div class="xs muted">${esc(p.code || '')}</div>` },
+      { h: 'กลุ่มเป้าหมาย', f: (p) => `${esc(p.target_group || '-')}${p.target_count ? ` <span class="tag">${p.target_count} คน</span>` : ''}` },
+      { h: 'ระยะเวลา', f: (p) => `<span class="small">${thDate(p.start_date)} - ${thDate(p.end_date)}</span>` },
+      { h: 'งบประมาณ', f: (p) => money(p.budget), cls: 'right' },
+      { h: 'สถานะ', f: (p) => tag(p.status === 'submitted' ? 'submitted_p' : p.status) }
+    ], rows, { rowAct: 'projectEdit', empty: 'ยังไม่มีโครงการ' });
+}
+function projectDefaults(d) {
+  const org = (S.settings.org || {}).name || '';
+  const y = new Date().getFullYear() + 543 + (new Date().getMonth() >= 9 ? 1 : 0);
+  return {
+    fiscal_year: y, status: 'draft', budget_source: 'กองทุนดูแลระยะยาวสำหรับผู้สูงอายุที่มีภาวะพึ่งพิง (LTC)',
+    title: 'โครงการดูแลผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงในชุมชน ประจำปีงบประมาณ ' + y,
+    rationale: `ปัจจุบันประเทศไทยเข้าสู่สังคมผู้สูงอายุอย่างสมบูรณ์ ผู้สูงอายุจำนวนหนึ่งมีภาวะพึ่งพิงจากโรคเรื้อรังและความเสื่อมถอยของร่างกาย จำเป็นต้องได้รับการดูแลอย่างต่อเนื่อง
+จากการสำรวจและประเมินความสามารถในการทำกิจวัตรประจำวัน (ADL) ในพื้นที่ ${org} พบผู้สูงอายุ ${num(d.elderly)} คน ประเมินแล้ว ${num(d.assessed)} คน เป็นผู้มีภาวะพึ่งพิงที่เข้าเกณฑ์ ${num(d.ltc_eligible)} คน (ติดบ้าน ${num(d.dep_home)} คน ติดเตียง ${num(d.dep_bed)} คน)
+จึงได้จัดทำโครงการนี้เพื่อให้ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงได้รับบริการดูแลระยะยาวด้านสาธารณสุขตามชุดสิทธิประโยชน์ โดยมี Care Manager และ Caregiver ดูแลตาม Care Plan รายบุคคล`,
+    objectives: '1. เพื่อให้ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิงได้รับการดูแลตามแผนการดูแลรายบุคคล (Care Plan)\n2. เพื่อป้องกันภาวะแทรกซ้อน เช่น แผลกดทับ ข้อติด และลดการกลับมารักษาซ้ำ\n3. เพื่อส่งเสริมคุณภาพชีวิตของผู้มีภาวะพึ่งพิงและครอบครัว',
+    target_group: 'ผู้สูงอายุและผู้พิการที่มีภาวะพึ่งพิง (ADL ≤ 11 คะแนน)', target_count: d.ltc_eligible,
+    expected_outcomes: '1. ผู้มีภาวะพึ่งพิงได้รับบริการตาม Care Plan ไม่น้อยกว่าร้อยละ 90\n2. ผู้มีภาวะพึ่งพิงไม่เกิดแผลกดทับรายใหม่\n3. ผู้ดูแลและครอบครัวมีความพึงพอใจต่อการให้บริการ',
+    evaluation: '1. ติดตามจากบันทึกการปฏิบัติงานของ Caregiver รายเดือน\n2. ประเมิน ADL ซ้ำทุก 6 เดือน\n3. สรุปผลการดำเนินงานรายไตรมาสเสนอคณะอนุกรรมการ',
+    activities: [
+      { name: 'สำรวจและประเมิน ADL ผู้สูงอายุ/ผู้พิการ', detail: 'คัดกรองกลุ่มเป้าหมายและจัดกลุ่มตามชุดสิทธิประโยชน์', period: 'ต.ค.-พ.ย.', budget: 0 },
+      { name: 'จัดทำ Care Plan รายบุคคล', detail: 'Care Manager จัดทำแผนร่วมกับครอบครัว', period: 'พ.ย.-ธ.ค.', budget: 0 },
+      { name: 'บริการดูแลที่บ้านโดย Caregiver', detail: 'ดูแลตาม Care Plan บันทึกผลพร้อมรูปภาพ', period: 'ตลอดปี', budget: 0 },
+      { name: 'ติดตาม ประเมินผล และสรุปโครงการ', detail: 'ประเมิน ADL ซ้ำ สรุปผลรายงานกองทุน', period: 'ก.ย.', budget: 0 }
+    ]
+  };
+}
+H.projectEdit = async (d) => {
+  let p;
+  if (d.id) p = await api('projects.get', { id: d.id });
+  else p = projectDefaults(await api('dashboard', {}));
+  const ro = !isStaff();
+  const ben = (p.beneficiaries || []).map((b) => ({ person_id: b.id, label: fname(b), moo: b.moo }));
+  const m = openModal({ title: p.id ? 'โครงการ' : 'จัดทำโครงการใหม่', wide: true, body: `
+    ${formHtml([
+      { k: 'title', label: 'ชื่อโครงการ', req: true, span: true },
+      { k: 'fiscal_year', label: 'ปีงบประมาณ (พ.ศ.)', type: 'number' }, { k: 'code', label: 'รหัสโครงการ' },
+      { k: 'status', label: 'สถานะ', type: 'select', blank: false, options: [['draft', 'ร่าง'], ['submitted', 'เสนอแล้ว'], ['approved', 'อนุมัติ'], ['running', 'ดำเนินการ'], ['done', 'เสร็จสิ้น']] },
+      { k: 'rationale', label: 'หลักการและเหตุผล', type: 'textarea', rows: 6, span: true },
+      { k: 'objectives', label: 'วัตถุประสงค์', type: 'textarea', rows: 4, span: true },
+      { k: 'target_group', label: 'กลุ่มเป้าหมาย', span: true }, { k: 'target_count', label: 'จำนวนเป้าหมาย (คน)', type: 'number' },
+      { k: 'location', label: 'สถานที่ดำเนินการ', def: (S.settings.org || {}).name }, { k: 'responsible', label: 'ผู้รับผิดชอบโครงการ' },
+      { k: 'start_date', label: 'วันเริ่มโครงการ', type: 'date' }, { k: 'end_date', label: 'วันสิ้นสุดโครงการ', type: 'date' },
+      { k: 'budget_source', label: 'แหล่งงบประมาณ' },
+      { k: 'expected_outcomes', label: 'ผลที่คาดว่าจะได้รับ', type: 'textarea', rows: 4, span: true },
+      { k: 'evaluation', label: 'การติดตามและประเมินผล', type: 'textarea', rows: 3, span: true }
+    ], p, 'c3')}
+    <div class="row mt mb"><h3 class="grow">กิจกรรมและงบประมาณ</h3>${ro ? '' : '<button class="btn btn-o btn-sm" data-addact>+ เพิ่มกิจกรรม</button>'}</div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th style="min-width:200px">กิจกรรม</th><th style="min-width:200px">รายละเอียด</th><th>ระยะเวลา</th><th>งบประมาณ</th><th></th></tr></thead><tbody data-acts></tbody>
+      <tfoot><tr><td colspan="3" class="right"><b>รวมงบประมาณ</b></td><td class="right"><b data-sum></b></td><td></td></tr></tfoot></table></div>
+    <div class="row mt mb"><h3 class="grow">กลุ่มเป้าหมาย (รายชื่อแนบท้ายโครงการ) <span class="tag" data-bencount></span></h3>
+      ${ro ? '' : '<button class="btn btn-g btn-sm" data-loadben>ดึงรายชื่อผู้เข้าเกณฑ์ LTC</button>'}</div>
+    <div data-ben class="small"></div>`,
+    foot: `${p.id ? exportBtns('project', { xlsx: false, params: { id: p.id } }) : ''}<span class="grow"></span>
+      ${p.id && !ro ? '<button class="btn btn-d" data-del>ลบ</button>' : ''}<button class="btn btn-o" data-act="closeModal">ปิด</button>${ro ? '' : '<button class="btn btn-p" data-save>บันทึกโครงการ</button>'}` });
+  const tb = $('[data-acts]', m);
+  const actRow = (a) => `<tr><td><input type="text" data-k="name" value="${esc(a.name || '')}"></td><td><input type="text" data-k="detail" value="${esc(a.detail || '')}"></td>
+    <td><input type="text" data-k="period" value="${esc(a.period || '')}" style="width:110px"></td><td><input type="number" data-k="budget" min="0" step="0.01" value="${a.budget || 0}" style="width:120px"></td>
+    <td><button class="btn-x" data-rm>✕</button></td></tr>`;
+  const sum = () => { $('[data-sum]', m).textContent = money($$('[data-k=budget]', tb).reduce((s, i) => s + Number(i.value || 0), 0)); };
+  tb.innerHTML = (p.activities || []).map(actRow).join(''); sum();
+  tb.addEventListener('input', sum);
+  tb.addEventListener('click', (e) => { if (e.target.closest('[data-rm]')) { e.target.closest('tr').remove(); sum(); } });
+  const addA = $('[data-addact]', m); if (addA) addA.onclick = () => { tb.insertAdjacentHTML('beforeend', actRow({})); };
+
+  let selected = new Set(ben.map((b) => b.person_id));
+  let list = ben;
+  const renderBen = () => {
+    $('[data-bencount]', m).textContent = `${selected.size} คน`;
+    $('[data-ben]', m).innerHTML = list.length ? `<label class="chk mb"><input type="checkbox" data-allben ${selected.size === list.length ? 'checked' : ''}> เลือกทั้งหมด</label>
+      <div class="grid g3" style="gap:4px 14px;max-height:260px;overflow:auto">${list.map((b) => `<label class="chk"><input type="checkbox" data-ben="${b.person_id}" ${selected.has(b.person_id) ? 'checked' : ''} ${ro ? 'disabled' : ''}>
+      ${esc(b.label)} <span class="xs muted">หมู่ ${esc(b.moo || '-')}${b.group ? ' · กลุ่ม ' + b.group : ''}</span></label>`).join('')}</div>` : '<span class="muted">ยังไม่ได้เลือกกลุ่มเป้าหมาย</span>';
+  };
+  renderBen();
+  $('[data-ben]', m).addEventListener('change', (e) => {
+    if (e.target.matches('[data-allben]')) { selected = new Set(e.target.checked ? list.map((b) => b.person_id) : []); renderBen(); }
+    else if (e.target.dataset.ben) { e.target.checked ? selected.add(e.target.dataset.ben) : selected.delete(e.target.dataset.ben); $('[data-bencount]', m).textContent = `${selected.size} คน`; }
+    $('[name=target_count]', m).value = selected.size;
+  });
+  const lb = $('[data-loadben]', m);
+  if (lb) lb.onclick = run(async () => {
+    const el = await api('projects.eligible');
+    const have = new Set(list.map((b) => b.person_id));
+    list = list.concat(el.filter((x) => !have.has(x.person_id)).map((x) => ({ person_id: x.person_id, label: fname(x), moo: x.moo, group: x.ltc_group })));
+    el.forEach((x) => selected.add(x.person_id));
+    renderBen(); $('[name=target_count]', m).value = selected.size;
+  });
+  const sv = $('[data-save]', m);
+  if (sv) sv.onclick = run(async () => {
+    validate(m);
+    const f = readForm(m);
+    Object.keys(f).filter((k) => !['title', 'fiscal_year', 'code', 'status', 'rationale', 'objectives', 'target_group', 'target_count', 'location', 'responsible', 'start_date', 'end_date', 'budget_source', 'expected_outcomes', 'evaluation'].includes(k)).forEach((k) => delete f[k]);
+    f.fiscal_year = f.fiscal_year ? Number(f.fiscal_year) : null; f.target_count = f.target_count ? Number(f.target_count) : null;
+    f.activities = $$('tr', tb).map((tr) => { const o = Object.fromEntries($$('[data-k]', tr).map((i) => [i.dataset.k, i.value.trim()])); o.budget = Number(o.budget || 0); return o; });
+    const saved = await api('projects.save', { project: Object.assign(f, { id: p.id }), beneficiary_ids: Array.from(selected) });
+    closeModal(m); toast('บันทึกโครงการแล้ว');
+    if (S.view === 'projects') refresh();
+    H.projectEdit({ id: saved.id });
+  });
+  const del = $('[data-del]', m);
+  if (del) del.onclick = run(async () => { if (!(await askConfirm('ลบโครงการนี้?', 'ลบ', true))) return; await api('projects.delete', { id: p.id }); closeModal(m); refresh(); });
+};
+
+// =====================================================================
+//  รายงาน / ส่งออก
+// =====================================================================
+const REPORTS = [
+  { id: 'persons', title: 'ทะเบียนประชากร', desc: 'รายชื่อประชากรพร้อมผล ADL ล่าสุด', roles: READ, fields: [{ k: 'moo', label: 'หมู่ที่' }, { k: 'elderly', label: 'เฉพาะ 60 ปีขึ้นไป', type: 'checkbox' }, { k: 'disabled', label: 'เฉพาะผู้พิการ', type: 'checkbox' }] },
+  { id: 'surveys', title: 'ผลการสำรวจประชากร', desc: 'ข้อมูลการอยู่อาศัย ผู้ดูแล และความต้องการ', roles: READ, fields: [{ k: 'from', label: 'ตั้งแต่', type: 'date' }, { k: 'to', label: 'ถึง', type: 'date' }] },
+  { id: 'adl', title: 'ผลการประเมิน ADL', desc: 'ระดับการพึ่งพิงและกลุ่มชุดสิทธิประโยชน์', roles: READ, fields: [{ k: 'group', label: 'กลุ่ม', type: 'select', options: [['eligible', 'เข้าเกณฑ์ LTC'], ['1', 'กลุ่ม 1'], ['2', 'กลุ่ม 2'], ['3', 'กลุ่ม 3'], ['4', 'กลุ่ม 4']] }, { k: 'moo', label: 'หมู่ที่' }] },
+  { id: 'caregivers', title: 'ทะเบียน Caregiver', desc: 'ข้อมูล CG และจำนวนผู้รับบริการ', roles: READ, fields: [] },
+  { id: 'plans', title: 'ทะเบียน Care Plan', desc: 'แผนการดูแลรายบุคคลและงบประมาณ', roles: ALL, fields: [{ k: 'status', label: 'สถานะ', type: 'select', options: [['draft', 'ร่าง'], ['approved', 'อนุมัติ'], ['active', 'ดำเนินการ'], ['closed', 'ปิด']] }] },
+  { id: 'visits', title: 'บันทึกการปฏิบัติงานของ CG', desc: 'กิจกรรม สัญญาณชีพ และจำนวนรูปภาพ', roles: ALL, fields: [{ k: 'from', label: 'ตั้งแต่', type: 'date', def: today().slice(0, 8) + '01' }, { k: 'to', label: 'ถึง', type: 'date', def: today() }, { k: 'status', label: 'สถานะ', type: 'select', options: [['verified', 'ตรวจแล้ว'], ['submitted', 'รอตรวจ'], ['rejected', 'ส่งกลับ']] }] },
+  { id: 'pay_cg', title: 'ค่าตอบแทน Caregiver', desc: 'บัญชีรายละเอียดการจ่ายพร้อมช่องลงนาม', roles: ALL, fields: [{ k: 'period', label: 'งวดเดือน', type: 'month', def: curMonth() }] },
+  { id: 'pay_cm', title: 'ค่าตอบแทน Care Manager', desc: 'บัญชีรายละเอียดการจ่ายพร้อมช่องลงนาม', roles: READ, fields: [{ k: 'period', label: 'งวดเดือน', type: 'month', def: curMonth() }] },
+  { id: 'projects', title: 'ทะเบียนโครงการ', desc: 'โครงการดูแลผู้สูงอายุ/ผู้พิการที่มีภาวะพึ่งพิง', roles: READ, fields: [] }
+];
+async function vReports() {
+  V.innerHTML = `<div class="hint mb">Excel สร้างในเบราว์เซอร์ทันที · Word / PDF สร้างผ่าน Google Docs (ฟอนต์ Sarabun) ใช้เวลาประมาณ 5-15 วินาที ·
+    เอกสาร Care Plan รายบุคคล บันทึกการเยี่ยม และเอกสารโครงการ ส่งออกได้จากหน้ารายละเอียดของแต่ละรายการ</div>
+    <div class="grid g3">${REPORTS.filter((r) => can(r.roles)).map((r) => `
+      <div class="card report-card" data-rep="${r.id}"><div><h3 style="margin:0">${esc(r.title)}</h3><div class="small muted">${esc(r.desc)}</div></div>
+        ${r.fields.length ? formHtml(r.fields) : ''}
+        <div class="row" style="margin-top:auto">
+          <button class="btn btn-o btn-sm" data-act="repExport" data-format="xlsx">Excel</button>
+          <button class="btn btn-o btn-sm" data-act="repExport" data-format="docx">Word</button>
+          <button class="btn btn-o btn-sm" data-act="repExport" data-format="pdf">PDF</button></div></div>`).join('')}</div>`;
+}
+H.repExport = (d, b) => {
+  const card = b.closest('[data-rep]');
+  const params = readForm(card);
+  if (card.dataset.rep === 'pay_cg' || card.dataset.rep === 'pay_cm') { if (!params.period) throw new Error('กรุณาเลือกงวดเดือน'); }
+  return exportReport(card.dataset.rep, params, d.format);
+};
+
+// =====================================================================
+//  ตั้งค่า
+// =====================================================================
+async function vSettings() {
+  const admin = can(['admin']);
+  const tab = admin ? S.state.setTab || 'org' : 'pw';
+  const tabs = admin ? [['org', 'ข้อมูลหน่วยงาน'], ['rates', 'อัตราค่าตอบแทน / งบประมาณ'], ['adl', 'เกณฑ์ ADL'], ['users', 'ผู้ใช้งาน'], ['audit', 'บันทึกการใช้งาน'], ['pw', 'เปลี่ยนรหัสผ่าน']] : [['pw', 'เปลี่ยนรหัสผ่าน']];
+  V.innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="setTab" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div><div id="setbody" class="card"></div>`;
+  const box = $('#setbody');
+  const st = S.settings;
+  const saveBtn = '<div class="row mt"><span class="grow"></span><button class="btn btn-p" data-save>บันทึกการตั้งค่า</button></div>';
+  if (tab === 'org') {
+    box.innerHTML = formHtml([
+      { k: 'name', label: 'ชื่อหน่วยงาน (อปท.)', span: true, req: true }, { k: 'unit', label: 'ชื่อกองทุน', span: true },
+      { k: 'subdistrict', label: 'ตำบล (ค่าเริ่มต้น)' }, { k: 'district', label: 'อำเภอ' }, { k: 'province', label: 'จังหวัด' },
+      { k: 'address', label: 'ที่อยู่', span: true }, { k: 'phone', label: 'โทรศัพท์' },
+      { k: 'director', label: 'ชื่อผู้บริหาร (ผู้อนุมัติ)' }, { k: 'director_position', label: 'ตำแหน่งผู้บริหาร' }
+    ], st.org || {}, 'c3') + saveBtn;
+    $('[data-save]', box).onclick = run(async () => { validate(box); S.settings = await api('settings.save', { key: 'org', value: readForm(box) }); toast('บันทึกแล้ว'); $('#orgName').textContent = S.settings.org.name; });
+  } else if (tab === 'rates') {
+    const r = st.rates || {}, gb = r.group_budget || {};
+    box.innerHTML = `<div class="warn mb">ตรวจสอบอัตราให้ตรงกับประกาศ สปสช. และประกาศคณะอนุกรรมการกองทุน LTC ในพื้นที่ก่อนใช้งานจริง</div>
+      <h3>งบประมาณกองทุน</h3>${formHtml([
+        { k: 'fund_per_person_year', label: 'งบต่อผู้มีภาวะพึ่งพิง (บาท/คน/ปี)', type: 'number' },
+        { k: 'g1', label: 'เพดาน Care Plan กลุ่ม 1 (บาท/ปี)', type: 'number' }, { k: 'g2', label: 'เพดาน กลุ่ม 2', type: 'number' },
+        { k: 'g3', label: 'เพดาน กลุ่ม 3', type: 'number' }, { k: 'g4', label: 'เพดาน กลุ่ม 4', type: 'number' }
+      ], Object.assign({}, r, { g1: gb[1], g2: gb[2], g3: gb[3], g4: gb[4] }), 'c3')}
+      <h3 class="mt">ค่าตอบแทน Caregiver</h3>${formHtml([
+        { k: 'cg_mode', label: 'วิธีคิดค่าตอบแทน', type: 'select', blank: false, options: [['per_visit', 'คิดตามจำนวนครั้งที่เยี่ยม'], ['per_patient', 'คิดตามจำนวนผู้รับบริการต่อเดือน']] },
+        { k: 'cg_rate_per_visit', label: 'อัตราต่อครั้ง (บาท)', type: 'number' }, { k: 'cg_rate_per_patient', label: 'อัตราต่อผู้รับบริการ/เดือน (บาท)', type: 'number' },
+        { k: 'cg_monthly_cap', label: 'เพดานต่อคน/เดือน (บาท, 0 = ไม่จำกัด)', type: 'number' }
+      ], r, 'c3')}
+      <h3 class="mt">ค่าตอบแทน Care Manager</h3>${formHtml([
+        { k: 'cm_rate_per_case', label: 'อัตราต่อเคสที่ดูแล/เดือน (บาท)', type: 'number' }, { k: 'cm_rate_per_new_plan', label: 'อัตราต่อ Care Plan ใหม่ที่อนุมัติ (บาท)', type: 'number' },
+        { k: 'cm_monthly_cap', label: 'เพดานต่อคน/เดือน (บาท, 0 = ไม่จำกัด)', type: 'number' }
+      ], r, 'c3')}${saveBtn}`;
+    $('[data-save]', box).onclick = run(async () => {
+      const f = readForm(box), v = {};
+      Object.keys(f).forEach((k) => { v[k] = k === 'cg_mode' ? f[k] : Number(f[k] || 0); });
+      v.group_budget = { 1: v.g1, 2: v.g2, 3: v.g3, 4: v.g4 }; ['g1', 'g2', 'g3', 'g4'].forEach((k) => delete v[k]);
+      S.settings = await api('settings.save', { key: 'rates', value: v }); toast('บันทึกแล้ว');
+    });
+  } else if (tab === 'adl') {
+    box.innerHTML = `<div class="hint mb">คะแนน Barthel ADL 0-20 · ค่าเริ่มต้น: ติดเตียง 0-4, ติดบ้าน 5-11, ติดสังคม 12-20 · เข้าเกณฑ์ LTC เมื่อ ADL ≤ 11</div>` + formHtml([
+      { k: 'bed_max', label: 'ติดเตียง: คะแนนสูงสุด', type: 'number' }, { k: 'home_max', label: 'ติดบ้าน: คะแนนสูงสุด', type: 'number' },
+      { k: 'ltc_max', label: 'เข้าเกณฑ์ LTC: คะแนนไม่เกิน', type: 'number' }
+    ], st.adl || {}, 'c3') + saveBtn;
+    $('[data-save]', box).onclick = run(async () => { const f = readForm(box); Object.keys(f).forEach((k) => { f[k] = Number(f[k]); }); S.settings = await api('settings.save', { key: 'adl', value: f }); toast('บันทึกแล้ว'); });
+  } else if (tab === 'users') {
+    const users = await api('users.list');
+    S.state.users = users;
+    box.innerHTML = `<div class="row mb"><span class="grow small muted">บทบาท: ผู้ดูแลระบบ = ทุกเมนู · Care Manager = จัดการข้อมูล/อนุมัติ · Caregiver = บันทึกการเยี่ยมของตนเอง · ผู้บริหาร = ดูข้อมูล/รายงาน</span>
+      <button class="btn btn-p" data-act="userEdit">+ เพิ่มผู้ใช้</button></div>` +
+      tableHtml([{ h: 'ชื่อผู้ใช้', f: (u) => `<b>${esc(u.username)}</b>` }, { h: 'ชื่อ-สกุล', f: (u) => esc(u.full_name) }, { h: 'บทบาท', f: (u) => `<span class="tag t-blue">${ROLE_TH[u.role]}</span>` },
+        { h: 'เข้าใช้ล่าสุด', f: (u) => (u.last_login ? thDate(u.last_login) : '-') }, { h: 'สถานะ', f: (u) => (u.active ? tag('active_s') : '<span class="tag t-red">ระงับ</span>') }], users, { rowAct: 'userEdit' });
+  } else if (tab === 'audit') {
+    const logs = await api('audit.list');
+    box.innerHTML = tableHtml([{ h: 'เวลา', f: (l) => new Date(l.created_at).toLocaleString('th-TH') }, { h: 'ผู้ใช้', f: (l) => esc(l.username) }, { h: 'การทำงาน', f: (l) => `<code>${esc(l.action)}</code>` }, { h: 'รหัสข้อมูล', f: (l) => `<span class="xs muted">${esc(l.entity_id || '')}</span>` }], logs);
+  } else {
+    box.innerHTML = `<div style="max-width:420px">${formHtml([{ k: 'old_password', label: 'รหัสผ่านเดิม', type: 'password', req: true, span: true }, { k: 'new_password', label: 'รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)', type: 'password', req: true, span: true }, { k: 'confirm', label: 'ยืนยันรหัสผ่านใหม่', type: 'password', req: true, span: true }])}</div>
+      <div class="row mt"><button class="btn btn-p" data-save>เปลี่ยนรหัสผ่าน</button></div>`;
+    $('[data-save]', box).onclick = run(async () => {
+      validate(box); const f = readForm(box);
+      if (f.new_password !== f.confirm) throw new Error('รหัสผ่านใหม่ไม่ตรงกัน');
+      await api('account.password', f); toast('เปลี่ยนรหัสผ่านแล้ว'); $$('input', box).forEach((i) => { i.value = ''; });
+    });
+  }
+}
+H.setTab = (d) => { S.state.setTab = d.tab; refresh(); };
+H.userEdit = async (d) => {
+  const u = (S.state.users || []).find((x) => x.id === d.id) || { role: 'cg', active: true };
+  const [cgs, cms] = await Promise.all([api('cg.list'), api('cm.list')]);
+  const m = openModal({ title: u.id ? `แก้ไขผู้ใช้ ${u.username}` : 'เพิ่มผู้ใช้งาน', body: formHtml([
+    u.id ? { k: '_u', label: 'ชื่อผู้ใช้', attrs: 'disabled' } : { k: 'username', label: 'ชื่อผู้ใช้ (a-z, 0-9)', req: true },
+    { k: 'full_name', label: 'ชื่อ-สกุล', req: true },
+    { k: 'role', label: 'บทบาท', type: 'select', blank: false, options: Object.entries(ROLE_TH) },
+    { k: 'caregiver_id', label: 'ผูกกับข้อมูล Caregiver', type: 'select', options: cgs.map((c) => [c.id, c.full_name]), hint: 'จำเป็นสำหรับบทบาท Caregiver' },
+    { k: 'care_manager_id', label: 'ผูกกับข้อมูล Care Manager', type: 'select', options: cms.map((c) => [c.id, c.full_name]) },
+    { k: 'password', label: u.id ? 'ตั้งรหัสผ่านใหม่ (เว้นว่างถ้าไม่เปลี่ยน)' : 'รหัสผ่าน', type: 'password', req: !u.id },
+    { k: 'active', label: 'เปิดใช้งาน', type: 'checkbox' }
+  ], Object.assign({ _u: u.username }, u)),
+    foot: `<button class="btn btn-o" data-act="closeModal">ยกเลิก</button><button class="btn btn-p" data-save>บันทึก</button>` });
+  $('[data-save]', m).onclick = run(async () => { validate(m); const f = readForm(m); delete f._u; await api('users.save', Object.assign(f, { id: u.id })); closeModal(m); toast('บันทึกแล้ว'); refresh(); });
+};
+
+// =====================================================================
+const VIEWS = {
+  dashboard: vDashboard, persons: vPersons, surveys: vSurveys, adl: vAdl, caregivers: vCaregivers, careplans: vCareplans,
+  visits: vVisits, payments: vPayments, projects: vProjects, reports: vReports, settings: vSettings
+};
+
+// เริ่มต้น: ใช้ session เดิมถ้ายังไม่หมดอายุ
+(async () => {
+  const t = LS.get('ltc_token');
+  if (!t) return;
+  S.token = t;
+  try { await boot(); } catch (e) { S.token = null; LS.del('ltc_token'); $('#app').hidden = true; $('#login').hidden = false; }
+})();
+</script>
