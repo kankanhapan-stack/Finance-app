@@ -12,7 +12,10 @@ const ALL = ['admin', 'cm', 'cg', 'viewer'], READ = ['admin', 'cm', 'viewer'], S
 // ---------------- utils ----------------
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// หมายเหตุ: ห้ามเขียน HTML entity ตรง ๆ ในไฟล์นี้ เพราะ Apps Script จะแปลงกลับเป็นตัวอักษรจริงและทำให้สคริปต์พัง
+const AMP = String.fromCharCode(38);
+const ESC_MAP = { '&': AMP + 'amp;', '<': AMP + 'lt;', '>': AMP + 'gt;', '"': AMP + 'quot;', "'": AMP + '#39;' };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -641,7 +644,7 @@ H.personImport = () => {
       return o;
     }).filter((o) => o.first_name);
     const cols = Object.keys(IMPORT_MAP).filter((k) => k !== 'full_name' && rows.some((r) => r[k] !== undefined && r[k] !== ''));
-    $('[data-preview]', m).innerHTML = `<div class="row mb small"><b>${num(rows.length)}</b>&nbsp;แถว · คอลัมน์ที่จับคู่ได้:
+    $('[data-preview]', m).innerHTML = `<div class="row mb small"><b>${num(rows.length)}</b> แถว · คอลัมน์ที่จับคู่ได้:
       ${Object.entries(map).map(([k, h]) => `<span class="tag t-green">${esc(h)}</span>`).join(' ')}
       ${heads.filter((h) => !Object.values(map).includes(h)).map((h) => `<span class="tag" title="ไม่ได้ใช้">${esc(h)}</span>`).join(' ')}</div>
       ${tableHtml(cols.map((k) => ({ h: k, f: (r) => esc(r[k] == null ? '' : r[k]) })), rows.slice(0, 8))}
@@ -1010,7 +1013,7 @@ async function planEditor(plan, label) {
       <input type="hidden" name="adl_id" value="${esc(p.adl_id || '')}">
       ${fieldHtml({ k: 'adl_score', label: 'คะแนน ADL', type: 'number', attrs: 'min="0" max="20"' }, p.adl_score == null ? '' : p.adl_score)}
       ${fieldHtml({ k: 'ltc_group', label: 'กลุ่มชุดสิทธิประโยชน์', type: 'select', options: [[1, 'กลุ่ม 1'], [2, 'กลุ่ม 2'], [3, 'กลุ่ม 3'], [4, 'กลุ่ม 4']] }, p.ltc_group)}
-      <div class="f"><label>&nbsp;</label><div class="xs muted" data-adlinfo></div></div>
+      <div class="f"><label>\u00a0</label><div class="xs muted" data-adlinfo></div></div>
       ${fieldHtml({ k: 'cm_id', label: 'Care Manager', type: 'select', options: cms.filter((x) => x.status === 'active' || x.id === p.cm_id).map((x) => [x.id, x.full_name]) }, p.cm_id)}
       ${fieldHtml({ k: 'cg_id', label: 'Caregiver ผู้ดูแล', type: 'select', options: cgs.filter((x) => x.status === 'active' || x.id === p.cg_id).map((x) => [x.id, `${x.full_name} (ดูแล ${x.case_count} คน)`]) }, p.cg_id)}
       <div></div>
