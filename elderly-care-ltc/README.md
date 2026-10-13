@@ -139,4 +139,5 @@ elderly-care-ltc/
 | กดเข้าสู่ระบบแล้วหน้าขาว | ใช้เวอร์ชันเก่าของ `App.html`/`Index.html` — คัดลอกไฟล์ล่าสุดแล้ว **Deploy → Manage deployments → Edit → Version: New version** (ถ้าไม่สร้างเวอร์ชันใหม่ URL เดิมจะยังใช้โค้ดเก่า) |
 | มีข้อความแดง "เริ่มระบบไม่สำเร็จ: Supabase 401/404 ..." | ตรวจ `SUPABASE_URL` (ไม่มี `/` ท้าย) และ `SUPABASE_SERVICE_KEY` ต้องเป็น **service_role** ไม่ใช่ anon key และต้องรัน `schema.sql` แล้ว |
 | "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" ทั้งที่เพิ่งตั้ง | ยังไม่ได้รัน `createInitialAdmin` หรือรันก่อนตั้ง `ADMIN_INITIAL_PASSWORD` — ตั้งค่าแล้วรันใหม่ (ชื่อผู้ใช้คือ `admin`) |
+| Console แจ้ง `SyntaxError: Unexpected token` | ไฟล์ `Code.gs` หรือ `Index.html` เป็นเวอร์ชันเก่า — ต้องใช้ `includeScript('App')` (ส่งโค้ดหน้าเว็บแบบ base64 เพราะ HtmlService แปลงเนื้อหาใน `<script>` ทำให้ JavaScript พัง) |
 | "โหลดสคริปต์ของระบบไม่สำเร็จ" | กด F12 → Console ดูข้อความ error แล้วแจ้งผู้พัฒนา |

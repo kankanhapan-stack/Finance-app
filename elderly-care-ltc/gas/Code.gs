@@ -19,6 +19,26 @@ function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
+/**
+ * ฝังไฟล์ JavaScript (เช่น App.html) แบบ base64
+ * HtmlService แปลงเนื้อหาในแท็ก <script> เหมือน HTML (ถอด entity / ตีความ <tag> ใน template string)
+ * ทำให้โค้ดพัง จึงส่งเป็น base64 ซึ่งมีแต่ A-Z a-z 0-9 + / = แล้วให้เบราว์เซอร์ถอดรหัสและรันเอง
+ * (ตัว loader ด้านล่างจงใจไม่มีอักขระ < และ & เลย)
+ */
+function includeScript(name) {
+  const code = HtmlService.createTemplateFromFile(name).getRawContent()
+    .replace(/^\s*<script[^>]*>/i, '')
+    .replace(/<\/script>\s*$/i, '');
+  const b64 = Utilities.base64Encode(code, Utilities.Charset.UTF_8);
+  return '<script>(function () {' +
+    'var bin = atob("' + b64 + '");' +
+    'var bytes = Uint8Array.from(bin, function (c) { return c.charCodeAt(0); });' +
+    'var s = document.createElement("script");' +
+    's.text = new TextDecoder("utf-8").decode(bytes) + "\\n//# sourceURL=' + name + '.js";' +
+    'document.body.appendChild(s);' +
+    '})();</script>';
+}
+
 // ======================= Auth =======================
 
 function hashPassword_(password, salt) {
