@@ -1,4 +1,5 @@
 <script>
+(function () {
 'use strict';
 /* =====================================================================
  *  LTC Dashboard — Front-end (Vanilla JS SPA บน HtmlService)
@@ -291,8 +292,15 @@ $('#loginForm').addEventListener('submit', run(async (e) => {
   if (!r.ok) { $('#loginErr').textContent = r.error; $('#loginErr').hidden = false; return; }
   S.token = r.data.token;
   LS.set('ltc_token', S.token);
-  await boot();
+  try { await boot(); } catch (err) { $('#app').hidden = true; $('#login').hidden = false; showFatal(err); }
 }));
+
+function showFatal(e) {
+  const el = $('#loginErr');
+  el.textContent = 'เริ่มระบบไม่สำเร็จ: ' + (e && e.message ? e.message : e);
+  el.hidden = false;
+}
+window.__ltcReady = true;
 
 async function boot() {
   const me = await api('me');
@@ -1548,6 +1556,7 @@ const VIEWS = {
   const t = LS.get('ltc_token');
   if (!t) return;
   S.token = t;
-  try { await boot(); } catch (e) { S.token = null; LS.del('ltc_token'); $('#app').hidden = true; $('#login').hidden = false; }
+  try { await boot(); } catch (e) { S.token = null; LS.del('ltc_token'); $('#app').hidden = true; $('#login').hidden = false; showFatal(e); }
+})();
 })();
 </script>

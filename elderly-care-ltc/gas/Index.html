@@ -14,7 +14,7 @@
 <body>
   <!-- ===== Login ===== -->
   <div id="login">
-    <form class="login-card" id="loginForm" autocomplete="on">
+    <form class="login-card" id="loginForm" autocomplete="on" action="javascript:void(0)" onsubmit="return false;">
       <div class="login-logo">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg>
       </div>
@@ -51,6 +51,20 @@
   <div id="toast"></div>
   <div id="busy" hidden></div>
 
+  <script>
+    window.addEventListener('error', function (e) {
+      var el = document.getElementById('loginErr');
+      if (el && !window.__ltcReady) { el.textContent = 'เกิดข้อผิดพลาดของหน้าเว็บ: ' + (e.message || e.error); el.hidden = false; }
+      if (window.console) console.error(e.error || e.message);
+    });
+  </script>
   <?!= include('App'); ?>
+  <script>
+    if (!window.__ltcReady) {
+      var el = document.getElementById('loginErr');
+      el.textContent = 'โหลดสคริปต์ของระบบไม่สำเร็จ กรุณากด F12 ดู Console แล้วแจ้งข้อความ error';
+      el.hidden = false;
+    }
+  </script>
 </body>
 </html>
